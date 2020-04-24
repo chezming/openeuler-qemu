@@ -50,6 +50,7 @@
 #include "hw/mem/nvdimm.h"
 #include "sysemu/numa.h"
 #include "sysemu/reset.h"
+#include "hw/hyperv/vmbus-bridge.h"
 
 /* Supported chipsets: */
 #include "hw/southbridge/piix.h"
@@ -1173,9 +1174,128 @@ static Aml *build_mouse_device_aml(void)
     return dev;
 }
 
+static Aml *build_lpt_device_aml(void)
+{
+    Aml *dev;
+    Aml *crs;
+    Aml *method;
+    Aml *if_ctx;
+    Aml *else_ctx;
+    Aml *zero = aml_int(0);
+    Aml *is_present = aml_local(0);
+
+    dev = aml_device("LPT");
+    aml_append(dev, aml_name_decl("_HID", aml_eisaid("PNP0400")));
+
+    method = aml_method("_STA", 0, AML_NOTSERIALIZED);
+    aml_append(method, aml_store(aml_name("LPEN"), is_present));
+    if_ctx = aml_if(aml_equal(is_present, zero));
+    {
+        aml_append(if_ctx, aml_return(aml_int(0x00)));
+    }
+    aml_append(method, if_ctx);
+    else_ctx = aml_else();
+    {
+        aml_append(else_ctx, aml_return(aml_int(0x0f)));
+    }
+    aml_append(method, else_ctx);
+    aml_append(dev, method);
+
+    crs = aml_resource_template();
+    aml_append(crs, aml_io(AML_DECODE16, 0x0378, 0x0378, 0x08, 0x08));
+    aml_append(crs, aml_irq_no_flags(7));
+    aml_append(dev, aml_name_decl("_CRS", crs));
+
+    return dev;
+}
+
+static Aml *build_com_device_aml(uint8_t uid)
+{
+    Aml *dev;
+    Aml *crs;
+    Aml *method;
+    Aml *if_ctx;
+    Aml *else_ctx;
+    Aml *zero = aml_int(0);
+    Aml *is_present = aml_local(0);
+    const char *enabled_field = "CAEN";
+    uint8_t irq = 4;
+    uint16_t io_port = 0x03F8;
+
+    assert(uid == 1 || uid == 2);
+    if (uid == 2) {
+        enabled_field = "CBEN";
+        irq = 3;
+        io_port = 0x02F8;
+    }
+
+    dev = aml_device("COM%d", uid);
+    aml_append(dev, aml_name_decl("_HID", aml_eisaid("PNP0501")));
+    aml_append(dev, aml_name_decl("_UID", aml_int(uid)));
+
+    method = aml_method("_STA", 0, AML_NOTSERIALIZED);
+    aml_append(method, aml_store(aml_name("%s", enabled_field), is_present));
+    if_ctx = aml_if(aml_equal(is_present, zero));
+    {
+        aml_append(if_ctx, aml_return(aml_int(0x00)));
+    }
+    aml_append(method, if_ctx);
+    else_ctx = aml_else();
+    {
+        aml_append(else_ctx, aml_return(aml_int(0x0f)));
+    }
+    aml_append(method, else_ctx);
+    aml_append(dev, method);
+
+    crs = aml_resource_template();
+    aml_append(crs, aml_io(AML_DECODE16, io_port, io_port, 0x00, 0x08));
+    aml_append(crs, aml_irq_no_flags(irq));
+    aml_append(dev, aml_name_decl("_CRS", crs));
+
+    return dev;
+}
+
+static Aml *build_vmbus_device_aml(VMBusBridge *vmbus_bridge)
+{
+    Aml *dev;
+    Aml *method;
+    Aml *crs;
+
+    dev = aml_device("VMBS");
+    aml_append(dev, aml_name_decl("STA", aml_int(0xF)));
+    aml_append(dev, aml_name_decl("_HID", aml_string("VMBus")));
+    aml_append(dev, aml_name_decl("_UID", aml_int(0x0)));
+    aml_append(dev, aml_name_decl("_DDN", aml_string("VMBUS")));
+
+    method = aml_method("_DIS", 0, AML_NOTSERIALIZED);
+    aml_append(method, aml_store(aml_and(aml_name("STA"), aml_int(0xD), NULL),
+                                     aml_name("STA")));
+    aml_append(dev, method);
+
+    method = aml_method("_PS0", 0, AML_NOTSERIALIZED);
+    aml_append(method, aml_store(aml_or(aml_name("STA"), aml_int(0xF), NULL),
+                                     aml_name("STA")));
+    aml_append(dev, method);
+
+    method = aml_method("_STA", 0, AML_NOTSERIALIZED);
+    aml_append(method, aml_return(aml_name("STA")));
+    aml_append(dev, method);
+
+    aml_append(dev, aml_name_decl("_PS3", aml_int(0x0)));
+
+    crs = aml_resource_template();
+    aml_append(crs, aml_irq_no_flags(vmbus_bridge->irq0));
+    /* FIXME: newer HyperV gets by with only one IRQ */
+    aml_append(crs, aml_irq_no_flags(vmbus_bridge->irq1));
+    aml_append(dev, aml_name_decl("_CRS", crs));
+
+    return dev;
+}
+
 static void build_isa_devices_aml(Aml *table)
 {
     ISADevice *fdc = pc_find_fdc0();
+    VMBusBridge *vmbus_bridge = vmbus_bridge_find();
     bool ambiguous;
 
     Aml *scope = aml_scope("_SB.PCI0.ISA");
@@ -1194,6 +1314,10 @@ static void build_isa_devices_aml(Aml *table)
     } else {
         build_acpi_ipmi_devices(scope, BUS(obj), "\\_SB.PCI0.ISA");
         isa_build_aml(ISA_BUS(obj), scope);
+    }
+
+    if (vmbus_bridge) {
+        aml_append(scope, build_vmbus_device_aml(vmbus_bridge));
     }
 
     aml_append(table, scope);
