@@ -481,8 +481,7 @@ static void fsl_imx6ul_realize(DeviceState *dev, Error **errp)
 
         object_property_set_uint(OBJECT(&s->usdhc[i]), SDHCI_VENDOR_IMX,
                                         "vendor", &error_abort);
-        object_property_set_bool(OBJECT(&s->usdhc[i]), true, "realized",
-                                 &error_abort);
+        sysbus_realize(SYS_BUS_DEVICE(&s->usdhc[i]), &error_abort);
 
         sysbus_mmio_map(SYS_BUS_DEVICE(&s->usdhc[i]), 0,
                         FSL_IMX6UL_USDHCn_ADDR[i]);

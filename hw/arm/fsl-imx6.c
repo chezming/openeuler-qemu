@@ -350,6 +350,11 @@ static void fsl_imx6_realize(DeviceState *dev, Error **errp)
             error_propagate(errp, err);
             return;
         }
+        sysbus_realize(SYS_BUS_DEVICE(&s->esdhc[i]), &err);
+        if (err) {
+            error_propagate(errp, err);
+            return;
+        }
         sysbus_mmio_map(SYS_BUS_DEVICE(&s->esdhc[i]), 0, esdhc_table[i].addr);
         sysbus_connect_irq(SYS_BUS_DEVICE(&s->esdhc[i]), 0,
                            qdev_get_gpio_in(DEVICE(&s->a9mpcore),
