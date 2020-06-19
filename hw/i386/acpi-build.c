@@ -977,7 +977,6 @@ static Aml *build_vmbus_device_aml(VMBusBridge *vmbus_bridge)
 
 static void build_isa_devices_aml(Aml *table)
 {
-    ISADevice *fdc = pc_find_fdc0();
     VMBusBridge *vmbus_bridge = vmbus_bridge_find();
     bool ambiguous;
 
@@ -986,9 +985,6 @@ static void build_isa_devices_aml(Aml *table)
 
     aml_append(scope, build_kbd_device_aml());
     aml_append(scope, build_mouse_device_aml());
-    if (fdc) {
-        aml_append(scope, build_fdc_device_aml(fdc));
-    }
 
     if (ambiguous) {
         error_report("Multiple ISA busses, unable to define IPMI ACPI data");
