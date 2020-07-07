@@ -2518,6 +2518,7 @@ static void virt_machine_5_0_options(MachineClass *mc)
     mc->numa_mem_supported = true;
     mc->auto_enable_numa_with_memdev = false;
     vmc->acpi_expose_flash = true;
+    mc->auto_enable_numa_with_memdev = false;
 }
 DEFINE_VIRT_MACHINE(5, 0)
 
