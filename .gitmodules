@@ -1,6 +1,3 @@
 [submodule "ui/keycodemapdb"]
 	path = ui/keycodemapdb
 	url = https://git.qemu.org/git/keycodemapdb.git
-[submodule "tests/fp/berkeley-testfloat-3"]
-	path = tests/fp/berkeley-testfloat-3
-	url = https://git.qemu.org/git/berkeley-testfloat-3.git
