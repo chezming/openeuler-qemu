@@ -1,9 +1,6 @@
 [submodule "roms/seabios"]
 	path = roms/seabios
 	url = https://git.qemu.org/git/seabios.git/
-[submodule "roms/qemu-palcode"]
-	path = roms/qemu-palcode
-	url = https://git.qemu.org/git/qemu-palcode.git
 [submodule "roms/sgabios"]
 	path = roms/sgabios
 	url = https://git.qemu.org/git/sgabios.git
