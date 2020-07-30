@@ -28,6 +28,3 @@
 [submodule "tests/fp/berkeley-softfloat-3"]
 	path = tests/fp/berkeley-softfloat-3
 	url = https://git.qemu.org/git/berkeley-softfloat-3.git
-[submodule "roms/opensbi"]
-	path = roms/opensbi
-	url = 	https://git.qemu.org/git/opensbi.git
