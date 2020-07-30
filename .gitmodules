@@ -1,9 +1,6 @@
 [submodule "roms/seabios"]
 	path = roms/seabios
 	url = https://git.qemu.org/git/seabios.git/
-[submodule "roms/ipxe"]
-	path = roms/ipxe
-	url = https://git.qemu.org/git/ipxe.git
 [submodule "roms/openbios"]
 	path = roms/openbios
 	url = https://git.qemu.org/git/openbios.git
