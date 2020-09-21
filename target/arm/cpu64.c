@@ -275,10 +275,12 @@ static void aarch64_kunpeng_920_initfn(Object *obj)
 
     cpu->midr = 0x480fd010;
     cpu->ctr = 0x84448004;
-    cpu->isar.regs[ID_AA64PFR0] = 0x11001111;
+    cpu->isar.regs[ID_AA64PFR0] = 0x0000010011111111;
     cpu->isar.regs[ID_AA64DFR0] = 0x110305408;
-    cpu->isar.regs[ID_AA64ISAR0] = 0x10211120;
+    cpu->isar.regs[ID_AA64ISAR0] = 0x0001100010211120;
+    cpu->isar.regs[ID_AA64ISAR1] = 0x00011001;
     cpu->isar.regs[ID_AA64MMFR0] = 0x101125;
+    cpu->isar.regs[ID_AA64MMFR1] = 0x10211122;
 }
 
 static void cpu_max_get_sve_vq(Object *obj, Visitor *v, const char *name,
