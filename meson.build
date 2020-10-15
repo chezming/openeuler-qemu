@@ -17,7 +17,13 @@ cc = meson.get_compiler('c')
 config_host = keyval.load(meson.current_build_dir() / 'config-host.mak')
 enable_modules = 'CONFIG_MODULES' in config_host
 enable_static = 'CONFIG_STATIC' in config_host
-build_docs = 'BUILD_DOCS' in config_host
+
+# Temporary directory used for files created while
+# configure runs. Since it is in the build directory
+# we can safely blow away any previous version of it
+# (and we need not jump through hoops to try to delete
+# it when configure exits.)
+tmpdir = meson.current_build_dir() / 'meson-private/temp'
 
 if get_option('qemu_suffix').startswith('/')
   error('qemu_suffix cannot start with a /')
@@ -1268,22 +1274,6 @@ foreach d : hx_headers
 endforeach
 genh += hxdep
 
-SPHINX_ARGS = [config_host['SPHINX_BUILD'],
-               '-Dversion=' + meson.project_version(),
-               '-Drelease=' + config_host['PKGVERSION']]
-
-if get_option('werror')
-  SPHINX_ARGS += [ '-W' ]
-endif
-
-sphinx_extn_depends = [ meson.source_root() / 'docs/sphinx/depfile.py',
-                        meson.source_root() / 'docs/sphinx/hxtool.py',
-                        meson.source_root() / 'docs/sphinx/kerneldoc.py',
-                        meson.source_root() / 'docs/sphinx/kernellog.py',
-                        meson.source_root() / 'docs/sphinx/qapidoc.py',
-                        meson.source_root() / 'docs/sphinx/qmp_lexer.py',
-                        qapi_gen_depends ]
-
 ###################
 # Collect sources #
 ###################
@@ -1868,8 +1858,8 @@ endif
 subdir('scripts')
 subdir('tools')
 subdir('pc-bios')
-subdir('tests')
 subdir('docs')
+subdir('tests')
 if 'CONFIG_GTK' in config_host
   subdir('po')
 endif
@@ -1951,7 +1941,7 @@ summary_info += {'QEMU_CFLAGS':       config_host['QEMU_CFLAGS']}
 summary_info += {'QEMU_LDFLAGS':      config_host['QEMU_LDFLAGS']}
 summary_info += {'make':              config_host['MAKE']}
 summary_info += {'python':            '@0@ (version: @1@)'.format(python.full_path(), python.language_version())}
-summary_info += {'sphinx-build':      config_host['SPHINX_BUILD']}
+summary_info += {'sphinx-build':      sphinx_build.found()}
 summary_info += {'genisoimage':       config_host['GENISOIMAGE']}
 # TODO: add back version
 summary_info += {'slirp support':     slirp_opt == 'disabled' ? false : slirp_opt}
@@ -2019,7 +2009,7 @@ if config_host.has_key('CONFIG_XEN_BACKEND')
   summary_info += {'xen ctrl version':  config_host['CONFIG_XEN_CTRL_INTERFACE_VERSION']}
 endif
 summary_info += {'brlapi support':    config_host.has_key('CONFIG_BRLAPI')}
-summary_info += {'Documentation':     config_host.has_key('BUILD_DOCS')}
+summary_info += {'Documentation':     build_docs}
 summary_info += {'PIE':               get_option('b_pie')}
 summary_info += {'vde support':       config_host.has_key('CONFIG_VDE')}
 summary_info += {'netmap support':    config_host.has_key('CONFIG_NETMAP')}
