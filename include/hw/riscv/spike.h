@@ -22,19 +22,12 @@
 #include "hw/riscv/riscv_hart.h"
 #include "hw/sysbus.h"
 
-#define SPIKE_CPUS_MAX 8
-#define SPIKE_SOCKETS_MAX 8
-
-#define TYPE_SPIKE_MACHINE MACHINE_TYPE_NAME("spike")
-#define SPIKE_MACHINE(obj) \
-    OBJECT_CHECK(SpikeState, (obj), TYPE_SPIKE_MACHINE)
-
 typedef struct {
     /*< private >*/
-    MachineState parent;
+    SysBusDevice parent_obj;
 
     /*< public >*/
-    RISCVHartArrayState soc[SPIKE_SOCKETS_MAX];
+    RISCVHartArrayState soc;
     void *fdt;
     int fdt_size;
 } SpikeState;
@@ -46,9 +39,11 @@ enum {
 };
 
 #if defined(TARGET_RISCV32)
-#define SPIKE_V1_10_0_CPU TYPE_RISCV_CPU_BASE32
+#define SPIKE_V1_09_1_CPU TYPE_RISCV_CPU_RV32GCSU_V1_09_1
+#define SPIKE_V1_10_0_CPU TYPE_RISCV_CPU_RV32GCSU_V1_10_0
 #elif defined(TARGET_RISCV64)
-#define SPIKE_V1_10_0_CPU TYPE_RISCV_CPU_BASE64
+#define SPIKE_V1_09_1_CPU TYPE_RISCV_CPU_RV64GCSU_V1_09_1
+#define SPIKE_V1_10_0_CPU TYPE_RISCV_CPU_RV64GCSU_V1_10_0
 #endif
 
 #endif
