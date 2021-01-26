@@ -33,7 +33,7 @@ char *
 host_memory_backend_get_name(HostMemoryBackend *backend)
 {
     if (!backend->use_canonical_path) {
-        return object_get_canonical_path_component(OBJECT(backend));
+        return g_strdup(object_get_canonical_path_component(OBJECT(backend)));
     }
 
     return object_get_canonical_path(OBJECT(backend));
@@ -54,28 +54,24 @@ host_memory_backend_set_size(Object *obj, Visitor *v, const char *name,
                              void *opaque, Error **errp)
 {
     HostMemoryBackend *backend = MEMORY_BACKEND(obj);
-    Error *local_err = NULL;
     uint64_t value;
 
     if (host_memory_backend_mr_inited(backend)) {
-        error_setg(&local_err, "cannot change property %s of %s ",
-                   name, object_get_typename(obj));
-        goto out;
+        error_setg(errp, "cannot change property %s of %s ", name,
+                   object_get_typename(obj));
+        return;
     }
 
-    visit_type_size(v, name, &value, &local_err);
-    if (local_err) {
-        goto out;
+    if (!visit_type_size(v, name, &value, errp)) {
+        return;
     }
     if (!value) {
-        error_setg(&local_err,
+        error_setg(errp,
                    "property '%s' of %s doesn't take value '%" PRIu64 "'",
                    name, object_get_typename(obj), value);
-        goto out;
+        return;
     }
     backend->size = value;
-out:
-    error_propagate(errp, local_err);
 }
 
 static void
@@ -254,22 +250,17 @@ static void host_memory_backend_set_prealloc_threads(Object *obj, Visitor *v,
     const char *name, void *opaque, Error **errp)
 {
     HostMemoryBackend *backend = MEMORY_BACKEND(obj);
-    Error *local_err = NULL;
     uint32_t value;
 
-    visit_type_uint32(v, name, &value, &local_err);
-    if (local_err) {
-        goto out;
+    if (!visit_type_uint32(v, name, &value, errp)) {
+        return;
     }
     if (value <= 0) {
-        error_setg(&local_err,
-                   "property '%s' of %s doesn't take value '%d'",
-                   name, object_get_typename(obj), value);
-        goto out;
+        error_setg(errp, "property '%s' of %s doesn't take value '%d'", name,
+                   object_get_typename(obj), value);
+        return;
     }
     backend->prealloc_threads = value;
-out:
-    error_propagate(errp, local_err);
 }
 
 static void host_memory_backend_init(Object *obj)
@@ -383,8 +374,10 @@ host_memory_backend_memory_complete(UserCreatable *uc, Error **errp)
         assert(sizeof(backend->host_nodes) >=
                BITS_TO_LONGS(MAX_NODES + 1) * sizeof(unsigned long));
         assert(maxnode <= MAX_NODES);
-        if (mbind(ptr, sz, backend->policy,
-                  maxnode ? backend->host_nodes : NULL, maxnode + 1, flags)) {
+
+        if (maxnode &&
+            mbind(ptr, sz, backend->policy, backend->host_nodes, maxnode + 1,
+                  flags)) {
             if (backend->policy != MPOL_DEFAULT || errno != ENOSYS) {
                 error_setg_errno(errp, errno,
                                  "cannot bind memory to host NUMA nodes");

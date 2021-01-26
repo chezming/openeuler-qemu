@@ -386,11 +386,9 @@ static void handle_arg_version(const char *arg)
     exit(EXIT_SUCCESS);
 }
 
-static char *trace_file;
 static void handle_arg_trace(const char *arg)
 {
-    g_free(trace_file);
-    trace_file = trace_opt_parse(arg);
+    trace_opt_parse(arg);
 }
 
 #if defined(TARGET_XTENSA)
@@ -672,7 +670,7 @@ int main(int argc, char **argv, char **envp)
     if (!trace_init_backends()) {
         exit(1);
     }
-    trace_init_file(trace_file);
+    trace_init_file();
     if (qemu_plugin_load_list(&plugins)) {
         exit(1);
     }
@@ -758,12 +756,24 @@ int main(int argc, char **argv, char **envp)
 
         if ((fp = fopen("/proc/sys/vm/mmap_min_addr", "r")) != NULL) {
             unsigned long tmp;
-            if (fscanf(fp, "%lu", &tmp) == 1) {
+            if (fscanf(fp, "%lu", &tmp) == 1 && tmp != 0) {
                 mmap_min_addr = tmp;
-                qemu_log_mask(CPU_LOG_PAGE, "host mmap_min_addr=0x%lx\n", mmap_min_addr);
+                qemu_log_mask(CPU_LOG_PAGE, "host mmap_min_addr=0x%lx\n",
+                              mmap_min_addr);
             }
             fclose(fp);
         }
+    }
+
+    /*
+     * We prefer to not make NULL pointers accessible to QEMU.
+     * If we're in a chroot with no /proc, fall back to 1 page.
+     */
+    if (mmap_min_addr == 0) {
+        mmap_min_addr = qemu_host_page_size;
+        qemu_log_mask(CPU_LOG_PAGE,
+                      "host mmap_min_addr=0x%lx (fallback)\n",
+                      mmap_min_addr);
     }
 
     /*

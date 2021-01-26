@@ -13,12 +13,12 @@
 #include "qemu/osdep.h"
 
 #include "qemu/main-loop.h"
-#include "tests/qtest/libqtest.h"
+#include "tests/qtest/libqos/libqtest.h"
 #include "tests/qtest/libqos/pci.h"
 #include "tests/qtest/libqos/pci-pc.h"
 #include "fuzz.h"
-#include "fuzz/qos_fuzz.h"
-#include "fuzz/fork_fuzz.h"
+#include "qos_fuzz.h"
+#include "fork_fuzz.h"
 
 
 #define I440FX_PCI_HOST_BRIDGE_CFG 0xcf8
@@ -151,15 +151,16 @@ static void i440fx_fuzz_qos_fork(QTestState *s,
         i440fx_fuzz_qos(s, Data, Size);
         _Exit(0);
     } else {
+        flush_events(s);
         wait(NULL);
     }
 }
 
 static const char *i440fx_qtest_argv = TARGET_NAME " -machine accel=qtest"
-                                       "-m 0 -display none";
-static const char *i440fx_argv(FuzzTarget *t)
+                                       " -m 0 -display none";
+static GString *i440fx_argv(FuzzTarget *t)
 {
-    return i440fx_qtest_argv;
+    return g_string_new(i440fx_qtest_argv);
 }
 
 static void fork_init(void)

@@ -4,7 +4,7 @@
  * Copyright (c) 2019 Western Digital Corporation or its affiliates.
  *
  * Authors:
- *   Anup Patel <anup.patel(a)wdc.com&gt;
+ *   Anup Patel <anup.patel@wdc.com>
  */
 
 #ifndef __SBI_ECALL_INTERFACE_H__

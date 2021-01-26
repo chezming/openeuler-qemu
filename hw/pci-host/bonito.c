@@ -40,6 +40,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu/units.h"
+#include "qapi/error.h"
 #include "qemu/error-report.h"
 #include "hw/pci/pci.h"
 #include "hw/irq.h"
@@ -51,6 +52,7 @@
 #include "exec/address-spaces.h"
 #include "hw/misc/unimp.h"
 #include "hw/registerfields.h"
+#include "qom/object.h"
 
 /* #define DEBUG_BONITO */
 
@@ -199,7 +201,7 @@ FIELD(BONGENCFG, PCIQUEUE,      12, 1)
 
 typedef struct BonitoState BonitoState;
 
-typedef struct PCIBonitoState {
+struct PCIBonitoState {
     PCIDevice dev;
 
     BonitoState *pcihost;
@@ -227,7 +229,8 @@ typedef struct PCIBonitoState {
     MemoryRegion bonito_pciio;
     MemoryRegion bonito_localio;
 
-} PCIBonitoState;
+};
+typedef struct PCIBonitoState PCIBonitoState;
 
 struct BonitoState {
     PCIHostState parent_obj;
@@ -237,12 +240,10 @@ struct BonitoState {
 };
 
 #define TYPE_BONITO_PCI_HOST_BRIDGE "Bonito-pcihost"
-#define BONITO_PCI_HOST_BRIDGE(obj) \
-    OBJECT_CHECK(BonitoState, (obj), TYPE_BONITO_PCI_HOST_BRIDGE)
+OBJECT_DECLARE_SIMPLE_TYPE(BonitoState, BONITO_PCI_HOST_BRIDGE)
 
 #define TYPE_PCI_BONITO "Bonito"
-#define PCI_BONITO(obj) \
-    OBJECT_CHECK(PCIBonitoState, (obj), TYPE_PCI_BONITO)
+OBJECT_DECLARE_SIMPLE_TYPE(PCIBonitoState, PCI_BONITO)
 
 static void bonito_writel(void *opaque, hwaddr addr,
                           uint64_t val, unsigned size)
@@ -743,17 +744,17 @@ PCIBus *bonito_init(qemu_irq *pic)
     PCIBonitoState *s;
     PCIDevice *d;
 
-    dev = qdev_create(NULL, TYPE_BONITO_PCI_HOST_BRIDGE);
+    dev = qdev_new(TYPE_BONITO_PCI_HOST_BRIDGE);
     phb = PCI_HOST_BRIDGE(dev);
     pcihost = BONITO_PCI_HOST_BRIDGE(dev);
     pcihost->pic = pic;
-    qdev_init_nofail(dev);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
 
-    d = pci_create(phb->bus, PCI_DEVFN(0, 0), TYPE_PCI_BONITO);
+    d = pci_new(PCI_DEVFN(0, 0), TYPE_PCI_BONITO);
     s = PCI_BONITO(d);
     s->pcihost = pcihost;
     pcihost->pci_dev = s;
-    qdev_init_nofail(DEVICE(d));
+    pci_realize_and_unref(d, phb->bus, &error_fatal);
 
     return phb->bus;
 }

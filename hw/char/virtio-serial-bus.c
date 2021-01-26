@@ -843,10 +843,6 @@ static Property virtser_props[] = {
     DEFINE_PROP_END_OF_LIST()
 };
 
-#define TYPE_VIRTIO_SERIAL_BUS "virtio-serial-bus"
-#define VIRTIO_SERIAL_BUS(obj) \
-      OBJECT_CHECK(VirtIOSerialBus, (obj), TYPE_VIRTIO_SERIAL_BUS)
-
 static void virtser_bus_class_init(ObjectClass *klass, void *data)
 {
     BusClass *k = BUS_CLASS(klass);
@@ -1056,7 +1052,7 @@ static void virtio_serial_device_realize(DeviceState *dev, Error **errp)
     /* Spawn a new virtio-serial bus on which the ports will ride as devices */
     qbus_create_inplace(&vser->bus, sizeof(vser->bus), TYPE_VIRTIO_SERIAL_BUS,
                         dev, vdev->bus_name);
-    qbus_set_hotplug_handler(BUS(&vser->bus), OBJECT(vser), errp);
+    qbus_set_hotplug_handler(BUS(&vser->bus), OBJECT(vser));
     vser->bus.vser = vser;
     QTAILQ_INIT(&vser->ports);
 
@@ -1147,7 +1143,7 @@ static void virtio_serial_device_unrealize(DeviceState *dev)
         g_free(vser->post_load);
     }
 
-    qbus_set_hotplug_handler(BUS(&vser->bus), NULL, &error_abort);
+    qbus_set_hotplug_handler(BUS(&vser->bus), NULL);
 
     virtio_cleanup(vdev);
 }

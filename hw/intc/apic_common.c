@@ -7,7 +7,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -187,6 +187,25 @@ bool apic_next_timer(APICCommonState *s, int64_t current_time)
     s->next_time = s->initial_count_load_time + (d << s->count_shift);
     s->timer_expiry = s->next_time;
     return true;
+}
+
+uint32_t apic_get_current_count(APICCommonState *s)
+{
+    int64_t d;
+    uint32_t val;
+    d = (qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) - s->initial_count_load_time) >>
+        s->count_shift;
+    if (s->lvt[APIC_LVT_TIMER] & APIC_LVT_TIMER_PERIODIC) {
+        /* periodic */
+        val = s->initial_count - (d % ((uint64_t)s->initial_count + 1));
+    } else {
+        if (d >= s->initial_count) {
+            val = 0;
+        } else {
+            val = s->initial_count - d;
+        }
+    }
+    return val;
 }
 
 void apic_init_reset(DeviceState *dev)
@@ -420,7 +439,6 @@ static void apic_common_set_id(Object *obj, Visitor *v, const char *name,
 {
     APICCommonState *s = APIC_COMMON(obj);
     DeviceState *dev = DEVICE(obj);
-    Error *local_err = NULL;
     uint32_t value;
 
     if (dev->realized) {
@@ -428,9 +446,7 @@ static void apic_common_set_id(Object *obj, Visitor *v, const char *name,
         return;
     }
 
-    visit_type_uint32(v, name, &value, &local_err);
-    if (local_err) {
-        error_propagate(errp, local_err);
+    if (!visit_type_uint32(v, name, &value, errp)) {
         return;
     }
 

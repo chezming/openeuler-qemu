@@ -28,7 +28,26 @@
 #include "hw/mem/nvdimm.h"
 #include "migration/vmstate.h"
 
-GlobalProperty hw_compat_5_0[] = {};
+GlobalProperty hw_compat_5_1[] = {
+    { "vhost-scsi", "num_queues", "1"},
+    { "vhost-user-blk", "num-queues", "1"},
+    { "vhost-user-scsi", "num_queues", "1"},
+    { "virtio-blk-device", "num-queues", "1"},
+    { "virtio-scsi-device", "num_queues", "1"},
+    { "nvme", "use-intel-id", "on"},
+    { "pvpanic", "events", "1"}, /* PVPANIC_PANICKED */
+};
+const size_t hw_compat_5_1_len = G_N_ELEMENTS(hw_compat_5_1);
+
+GlobalProperty hw_compat_5_0[] = {
+    { "pci-host-bridge", "x-config-reg-migration-enabled", "off" },
+    { "virtio-balloon-device", "page-poison", "false" },
+    { "vmport", "x-read-set-eax", "off" },
+    { "vmport", "x-signal-unsupported-cmd", "off" },
+    { "vmport", "x-report-vmx-type", "off" },
+    { "vmport", "x-cmds-v2", "off" },
+    { "virtio-device", "x-disable-legacy-check", "true" },
+};
 const size_t hw_compat_5_0_len = G_N_ELEMENTS(hw_compat_5_0);
 
 GlobalProperty hw_compat_4_2[] = {
@@ -284,12 +303,9 @@ static void machine_set_phandle_start(Object *obj, Visitor *v,
                                       Error **errp)
 {
     MachineState *ms = MACHINE(obj);
-    Error *error = NULL;
     int64_t value;
 
-    visit_type_int(v, name, &value, &error);
-    if (error) {
-        error_propagate(errp, error);
+    if (!visit_type_int(v, name, &value, errp)) {
         return;
     }
 
@@ -395,24 +411,6 @@ static bool machine_get_suppress_vmdesc(Object *obj, Error **errp)
     MachineState *ms = MACHINE(obj);
 
     return ms->suppress_vmdesc;
-}
-
-static void machine_set_enforce_config_section(Object *obj, bool value,
-                                             Error **errp)
-{
-    MachineState *ms = MACHINE(obj);
-
-    warn_report("enforce-config-section is deprecated, please use "
-                "-global migration.send-configuration=on|off instead");
-
-    ms->enforce_config_section = value;
-}
-
-static bool machine_get_enforce_config_section(Object *obj, Error **errp)
-{
-    MachineState *ms = MACHINE(obj);
-
-    return ms->enforce_config_section;
 }
 
 static char *machine_get_memory_encryption(Object *obj, Error **errp)
@@ -741,21 +739,13 @@ static void smp_parse(MachineState *ms, QemuOpts *opts)
             exit(1);
         }
 
-        if (sockets * cores * threads > ms->smp.max_cpus) {
-            error_report("cpu topology: "
-                         "sockets (%u) * cores (%u) * threads (%u) > "
-                         "maxcpus (%u)",
+        if (sockets * cores * threads != ms->smp.max_cpus) {
+            error_report("Invalid CPU topology: "
+                         "sockets (%u) * cores (%u) * threads (%u) "
+                         "!= maxcpus (%u)",
                          sockets, cores, threads,
                          ms->smp.max_cpus);
             exit(1);
-        }
-
-        if (sockets * cores * threads != ms->smp.max_cpus) {
-            warn_report("Invalid CPU topology deprecated: "
-                        "sockets (%u) * cores (%u) * threads (%u) "
-                        "!= maxcpus (%u)",
-                        sockets, cores, threads,
-                        ms->smp.max_cpus);
         }
 
         ms->smp.cpus = cpus;
@@ -784,7 +774,6 @@ static void machine_class_init(ObjectClass *oc, void *data)
      * On Linux, each node's border has to be 8MB aligned
      */
     mc->numa_mem_align_shift = 23;
-    mc->numa_auto_assign_ram = numa_default_auto_assign_ram;
 
     object_class_property_add_str(oc, "kernel",
         machine_get_kernel, machine_set_kernel);
@@ -852,21 +841,26 @@ static void machine_class_init(ObjectClass *oc, void *data)
     object_class_property_set_description(oc, "suppress-vmdesc",
         "Set on to disable self-describing migration");
 
-    object_class_property_add_bool(oc, "enforce-config-section",
-        machine_get_enforce_config_section, machine_set_enforce_config_section);
-    object_class_property_set_description(oc, "enforce-config-section",
-        "Set on to enforce configuration section migration");
-
     object_class_property_add_str(oc, "memory-encryption",
         machine_get_memory_encryption, machine_set_memory_encryption);
     object_class_property_set_description(oc, "memory-encryption",
         "Set memory encryption object to use");
+
+    object_class_property_add_str(oc, "memory-backend",
+                                  machine_get_memdev, machine_set_memdev);
+    object_class_property_set_description(oc, "memory-backend",
+                                          "Set RAM backend"
+                                          "Valid value is ID of hostmem based backend");
 }
 
 static void machine_class_base_init(ObjectClass *oc, void *data)
 {
+    MachineClass *mc = MACHINE_CLASS(oc);
+    mc->max_cpus = mc->max_cpus ?: 1;
+    mc->min_cpus = mc->min_cpus ?: 1;
+    mc->default_cpus = mc->default_cpus ?: 1;
+
     if (!object_class_is_abstract(oc)) {
-        MachineClass *mc = MACHINE_CLASS(oc);
         const char *cname = object_class_get_name(oc);
         assert(g_str_has_suffix(cname, TYPE_MACHINE_SUFFIX));
         mc->name = g_strndup(cname,
@@ -912,15 +906,16 @@ static void machine_initfn(Object *obj)
                                         "Table (HMAT)");
     }
 
-    object_property_add_str(obj, "memory-backend",
-                            machine_get_memdev, machine_set_memdev);
-    object_property_set_description(obj, "memory-backend",
-                                    "Set RAM backend"
-                                    "Valid value is ID of hostmem based backend");
-
     /* Register notifier when init is done for sysbus sanity checks */
     ms->sysbus_notifier.notify = machine_init_notify;
     qemu_add_machine_init_done_notifier(&ms->sysbus_notifier);
+
+    /* default to mc->default_cpus */
+    ms->smp.cpus = mc->default_cpus;
+    ms->smp.max_cpus = mc->default_cpus;
+    ms->smp.cores = 1;
+    ms->smp.threads = 1;
+    ms->smp.sockets = 1;
 }
 
 static void machine_finalize(Object *obj)
@@ -1070,9 +1065,8 @@ MemoryRegion *machine_consume_memdev(MachineState *machine,
     MemoryRegion *ret = host_memory_backend_get_memory(backend);
 
     if (memory_region_is_mapped(ret)) {
-        char *path = object_get_canonical_path_component(OBJECT(backend));
-        error_report("memory backend %s can't be used multiple times.", path);
-        g_free(path);
+        error_report("memory backend %s can't be used multiple times.",
+                     object_get_canonical_path_component(OBJECT(backend)));
         exit(EXIT_FAILURE);
     }
     host_memory_backend_set_mapped(backend, true);
@@ -1083,6 +1077,8 @@ MemoryRegion *machine_consume_memdev(MachineState *machine,
 void machine_run_board_init(MachineState *machine)
 {
     MachineClass *machine_class = MACHINE_GET_CLASS(machine);
+    ObjectClass *oc = object_class_by_name(machine->cpu_type);
+    CPUClass *cc;
 
     if (machine->ram_memdev_id) {
         Object *o;
@@ -1102,11 +1098,10 @@ void machine_run_board_init(MachineState *machine)
      * specified a CPU with -cpu check here that the user CPU is supported.
      */
     if (machine_class->valid_cpu_types && machine->cpu_type) {
-        ObjectClass *class = object_class_by_name(machine->cpu_type);
         int i;
 
         for (i = 0; machine_class->valid_cpu_types[i]; i++) {
-            if (object_class_dynamic_cast(class,
+            if (object_class_dynamic_cast(oc,
                                           machine_class->valid_cpu_types[i])) {
                 /* The user specificed CPU is in the valid field, we are
                  * good to go.
@@ -1127,6 +1122,13 @@ void machine_run_board_init(MachineState *machine)
 
             exit(1);
         }
+    }
+
+    /* Check if CPU type is deprecated and warn if so */
+    cc = CPU_CLASS(oc);
+    if (cc && cc->deprecation_note) {
+        warn_report("CPU model %s is deprecated -- %s", machine->cpu_type,
+                    cc->deprecation_note);
     }
 
     machine_class->init(machine);

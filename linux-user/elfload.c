@@ -12,6 +12,7 @@
 #include "qemu/guest-random.h"
 #include "qemu/units.h"
 #include "qemu/selfmap.h"
+#include "qapi/error.h"
 
 #ifdef _ARCH_PPC64
 #undef ARCH_DLINFO
@@ -389,7 +390,7 @@ static bool init_guest_commpage(void)
 {
     void *want = g2h(ARM_COMMPAGE & -qemu_host_page_size);
     void *addr = mmap(want, qemu_host_page_size, PROT_READ | PROT_WRITE,
-                      MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+                      MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED, -1, 0);
 
     if (addr == MAP_FAILED) {
         perror("Allocating guest commpage");
@@ -918,6 +919,12 @@ static void elf_core_copy_regs(target_elf_gregset_t *regs, const CPUPPCState *en
 
 #define elf_check_arch(x) ((x) == EM_MIPS || (x) == EM_NANOMIPS)
 
+#ifdef TARGET_ABI_MIPSN32
+#define elf_check_abi(x) ((x) & EF_MIPS_ABI2)
+#else
+#define elf_check_abi(x) (!((x) & EF_MIPS_ABI2))
+#endif
+
 static inline void init_thread(struct target_pt_regs *regs,
                                struct image_info *infop)
 {
@@ -1032,9 +1039,12 @@ static void elf_core_copy_regs(target_elf_gregset_t *regs, const CPUMBState *env
         (*regs)[pos++] = tswapreg(env->regs[i]);
     }
 
-    for (i = 0; i < 6; i++) {
-        (*regs)[pos++] = tswapreg(env->sregs[i]);
-    }
+    (*regs)[pos++] = tswapreg(env->pc);
+    (*regs)[pos++] = tswapreg(mb_cpu_read_msr(env));
+    (*regs)[pos++] = 0;
+    (*regs)[pos++] = tswapreg(env->ear);
+    (*regs)[pos++] = 0;
+    (*regs)[pos++] = tswapreg(env->esr);
 }
 
 #endif /* TARGET_MICROBLAZE */
@@ -1487,6 +1497,10 @@ static void elf_core_copy_regs(target_elf_gregset_t *regs,
 #define elf_check_arch(x) ((x) == ELF_ARCH)
 #endif
 
+#ifndef elf_check_abi
+#define elf_check_abi(x) (1)
+#endif
+
 #ifndef ELF_HWCAP
 #define ELF_HWCAP 0
 #endif
@@ -1507,6 +1521,39 @@ static void elf_core_copy_regs(target_elf_gregset_t *regs,
 #endif
 
 #include "elf.h"
+
+/* We must delay the following stanzas until after "elf.h". */
+#if defined(TARGET_AARCH64)
+
+static bool arch_parse_elf_property(uint32_t pr_type, uint32_t pr_datasz,
+                                    const uint32_t *data,
+                                    struct image_info *info,
+                                    Error **errp)
+{
+    if (pr_type == GNU_PROPERTY_AARCH64_FEATURE_1_AND) {
+        if (pr_datasz != sizeof(uint32_t)) {
+            error_setg(errp, "Ill-formed GNU_PROPERTY_AARCH64_FEATURE_1_AND");
+            return false;
+        }
+        /* We will extract GNU_PROPERTY_AARCH64_FEATURE_1_BTI later. */
+        info->note_flags = *data;
+    }
+    return true;
+}
+#define ARCH_USE_GNU_PROPERTY 1
+
+#else
+
+static bool arch_parse_elf_property(uint32_t pr_type, uint32_t pr_datasz,
+                                    const uint32_t *data,
+                                    struct image_info *info,
+                                    Error **errp)
+{
+    g_assert_not_reached();
+}
+#define ARCH_USE_GNU_PROPERTY 0
+
+#endif
 
 struct exec
 {
@@ -1644,6 +1691,7 @@ static bool elf_check_ident(struct elfhdr *ehdr)
 static bool elf_check_ehdr(struct elfhdr *ehdr)
 {
     return (elf_check_arch(ehdr->e_machine)
+            && elf_check_abi(ehdr->e_flags)
             && ehdr->e_ehsize == sizeof(struct elfhdr)
             && ehdr->e_phentsize == sizeof(struct elf_phdr)
             && (ehdr->e_type == ET_EXEC || ehdr->e_type == ET_DYN));
@@ -2073,12 +2121,14 @@ static void pgb_have_guest_base(const char *image_name, abi_ulong guest_loaddr,
             exit(EXIT_FAILURE);
         }
     } else {
+#if HOST_LONG_BITS < TARGET_ABI_BITS
         if ((guest_hiaddr - guest_base) > ~(uintptr_t)0) {
             error_report("%s: requires more virtual address space "
                          "than the host can provide (0x%" PRIx64 ")",
                          image_name, (uint64_t)guest_hiaddr - guest_base);
             exit(EXIT_FAILURE);
         }
+#endif
     }
 
     /*
@@ -2099,9 +2149,58 @@ static void pgb_have_guest_base(const char *image_name, abi_ulong guest_loaddr,
     }
 }
 
+/**
+ * pgd_find_hole_fallback: potential mmap address
+ * @guest_size: size of available space
+ * @brk: location of break
+ * @align: memory alignment
+ *
+ * This is a fallback method for finding a hole in the host address
+ * space if we don't have the benefit of being able to access
+ * /proc/self/map. It can potentially take a very long time as we can
+ * only dumbly iterate up the host address space seeing if the
+ * allocation would work.
+ */
+static uintptr_t pgd_find_hole_fallback(uintptr_t guest_size, uintptr_t brk,
+                                        long align, uintptr_t offset)
+{
+    uintptr_t base;
+
+    /* Start (aligned) at the bottom and work our way up */
+    base = ROUND_UP(mmap_min_addr, align);
+
+    while (true) {
+        uintptr_t align_start, end;
+        align_start = ROUND_UP(base, align);
+        end = align_start + guest_size + offset;
+
+        /* if brk is anywhere in the range give ourselves some room to grow. */
+        if (align_start <= brk && brk < end) {
+            base = brk + (16 * MiB);
+            continue;
+        } else if (align_start + guest_size < align_start) {
+            /* we have run out of space */
+            return -1;
+        } else {
+            int flags = MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE |
+                MAP_FIXED_NOREPLACE;
+            void * mmap_start = mmap((void *) align_start, guest_size,
+                                     PROT_NONE, flags, -1, 0);
+            if (mmap_start != MAP_FAILED) {
+                munmap((void *) align_start, guest_size);
+                if (MAP_FIXED_NOREPLACE != 0 ||
+                    mmap_start == (void *) align_start) {
+                    return (uintptr_t) mmap_start + offset;
+                }
+            }
+            base += qemu_host_page_size;
+        }
+    }
+}
+
 /* Return value for guest_base, or -1 if no hole found. */
 static uintptr_t pgb_find_hole(uintptr_t guest_loaddr, uintptr_t guest_size,
-                               long align)
+                               long align, uintptr_t offset)
 {
     GSList *maps, *iter;
     uintptr_t this_start, this_end, next_start, brk;
@@ -2114,6 +2213,10 @@ static uintptr_t pgb_find_hole(uintptr_t guest_loaddr, uintptr_t guest_size,
     /* Read brk after we've read the maps, which will malloc. */
     brk = (uintptr_t)sbrk(0);
 
+    if (!maps) {
+        return pgd_find_hole_fallback(guest_size, brk, align, offset);
+    }
+
     /* The first hole is before the first map entry. */
     this_start = mmap_min_addr;
 
@@ -2123,7 +2226,7 @@ static uintptr_t pgb_find_hole(uintptr_t guest_loaddr, uintptr_t guest_size,
 
         this_end = ((MapInfo *)iter->data)->start;
         next_start = ((MapInfo *)iter->data)->end;
-        align_start = ROUND_UP(this_start, align);
+        align_start = ROUND_UP(this_start + offset, align);
 
         /* Skip holes that are too small. */
         if (align_start >= this_end) {
@@ -2173,6 +2276,7 @@ static void pgb_static(const char *image_name, abi_ulong orig_loaddr,
 {
     uintptr_t loaddr = orig_loaddr;
     uintptr_t hiaddr = orig_hiaddr;
+    uintptr_t offset = 0;
     uintptr_t addr;
 
     if (hiaddr != orig_hiaddr) {
@@ -2186,18 +2290,19 @@ static void pgb_static(const char *image_name, abi_ulong orig_loaddr,
     if (ARM_COMMPAGE) {
         /*
          * Extend the allocation to include the commpage.
-         * For a 64-bit host, this is just 4GiB; for a 32-bit host,
-         * the address arithmetic will wrap around, but the difference
-         * will produce the correct allocation size.
+         * For a 64-bit host, this is just 4GiB; for a 32-bit host we
+         * need to ensure there is space bellow the guest_base so we
+         * can map the commpage in the place needed when the address
+         * arithmetic wraps around.
          */
         if (sizeof(uintptr_t) == 8 || loaddr >= 0x80000000u) {
-            hiaddr = (uintptr_t)4 << 30;
+            hiaddr = (uintptr_t) 4 << 30;
         } else {
-            loaddr = ARM_COMMPAGE & -align;
+            offset = -(ARM_COMMPAGE & -align);
         }
     }
 
-    addr = pgb_find_hole(loaddr, hiaddr - loaddr, align);
+    addr = pgb_find_hole(loaddr, hiaddr - loaddr, align, offset);
     if (addr == -1) {
         /*
          * If ARM_COMMPAGE, there *might* be a non-consecutive allocation
@@ -2232,7 +2337,7 @@ static void pgb_dynamic(const char *image_name, long align)
          * just above that, and maximises the positive guest addresses.
          */
         commpage = ARM_COMMPAGE & -align;
-        addr = pgb_find_hole(commpage, -commpage, align);
+        addr = pgb_find_hole(commpage, -commpage, align, 0);
         assert(addr != -1);
         guest_base = addr;
     }
@@ -2241,7 +2346,7 @@ static void pgb_dynamic(const char *image_name, long align)
 static void pgb_reserved_va(const char *image_name, abi_ulong guest_loaddr,
                             abi_ulong guest_hiaddr, long align)
 {
-    const int flags = MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE;
+    int flags = MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE;
     void *addr, *test;
 
     if (guest_hiaddr > reserved_va) {
@@ -2254,18 +2359,20 @@ static void pgb_reserved_va(const char *image_name, abi_ulong guest_loaddr,
     /* Widen the "image" to the entire reserved address space. */
     pgb_static(image_name, 0, reserved_va, align);
 
+    /* osdep.h defines this as 0 if it's missing */
+    flags |= MAP_FIXED_NOREPLACE;
+
     /* Reserve the memory on the host. */
     assert(guest_base != 0);
     test = g2h(0);
     addr = mmap(test, reserved_va, PROT_NONE, flags, -1, 0);
-    if (addr == MAP_FAILED) {
+    if (addr == MAP_FAILED || addr != test) {
         error_report("Unable to reserve 0x%lx bytes of virtual address "
-                     "space for use as guest address space (check your "
-                     "virtual memory ulimit setting or reserve less "
-                     "using -R option)", reserved_va);
+                     "space at %p (%s) for use as guest address space (check your"
+                     "virtual memory ulimit setting, min_mmap_addr or reserve less "
+                     "using -R option)", reserved_va, test, strerror(errno));
         exit(EXIT_FAILURE);
     }
-    assert(addr == test);
 }
 
 void probe_guest_base(const char *image_name, abi_ulong guest_loaddr,
@@ -2300,6 +2407,150 @@ void probe_guest_base(const char *image_name, abi_ulong guest_loaddr,
                   "@ 0x%" PRIx64 "\n", (uint64_t)guest_base);
 }
 
+enum {
+    /* The string "GNU\0" as a magic number. */
+    GNU0_MAGIC = const_le32('G' | 'N' << 8 | 'U' << 16),
+    NOTE_DATA_SZ = 1 * KiB,
+    NOTE_NAME_SZ = 4,
+    ELF_GNU_PROPERTY_ALIGN = ELF_CLASS == ELFCLASS32 ? 4 : 8,
+};
+
+/*
+ * Process a single gnu_property entry.
+ * Return false for error.
+ */
+static bool parse_elf_property(const uint32_t *data, int *off, int datasz,
+                               struct image_info *info, bool have_prev_type,
+                               uint32_t *prev_type, Error **errp)
+{
+    uint32_t pr_type, pr_datasz, step;
+
+    if (*off > datasz || !QEMU_IS_ALIGNED(*off, ELF_GNU_PROPERTY_ALIGN)) {
+        goto error_data;
+    }
+    datasz -= *off;
+    data += *off / sizeof(uint32_t);
+
+    if (datasz < 2 * sizeof(uint32_t)) {
+        goto error_data;
+    }
+    pr_type = data[0];
+    pr_datasz = data[1];
+    data += 2;
+    datasz -= 2 * sizeof(uint32_t);
+    step = ROUND_UP(pr_datasz, ELF_GNU_PROPERTY_ALIGN);
+    if (step > datasz) {
+        goto error_data;
+    }
+
+    /* Properties are supposed to be unique and sorted on pr_type. */
+    if (have_prev_type && pr_type <= *prev_type) {
+        if (pr_type == *prev_type) {
+            error_setg(errp, "Duplicate property in PT_GNU_PROPERTY");
+        } else {
+            error_setg(errp, "Unsorted property in PT_GNU_PROPERTY");
+        }
+        return false;
+    }
+    *prev_type = pr_type;
+
+    if (!arch_parse_elf_property(pr_type, pr_datasz, data, info, errp)) {
+        return false;
+    }
+
+    *off += 2 * sizeof(uint32_t) + step;
+    return true;
+
+ error_data:
+    error_setg(errp, "Ill-formed property in PT_GNU_PROPERTY");
+    return false;
+}
+
+/* Process NT_GNU_PROPERTY_TYPE_0. */
+static bool parse_elf_properties(int image_fd,
+                                 struct image_info *info,
+                                 const struct elf_phdr *phdr,
+                                 char bprm_buf[BPRM_BUF_SIZE],
+                                 Error **errp)
+{
+    union {
+        struct elf_note nhdr;
+        uint32_t data[NOTE_DATA_SZ / sizeof(uint32_t)];
+    } note;
+
+    int n, off, datasz;
+    bool have_prev_type;
+    uint32_t prev_type;
+
+    /* Unless the arch requires properties, ignore them. */
+    if (!ARCH_USE_GNU_PROPERTY) {
+        return true;
+    }
+
+    /* If the properties are crazy large, that's too bad. */
+    n = phdr->p_filesz;
+    if (n > sizeof(note)) {
+        error_setg(errp, "PT_GNU_PROPERTY too large");
+        return false;
+    }
+    if (n < sizeof(note.nhdr)) {
+        error_setg(errp, "PT_GNU_PROPERTY too small");
+        return false;
+    }
+
+    if (phdr->p_offset + n <= BPRM_BUF_SIZE) {
+        memcpy(&note, bprm_buf + phdr->p_offset, n);
+    } else {
+        ssize_t len = pread(image_fd, &note, n, phdr->p_offset);
+        if (len != n) {
+            error_setg_errno(errp, errno, "Error reading file header");
+            return false;
+        }
+    }
+
+    /*
+     * The contents of a valid PT_GNU_PROPERTY is a sequence
+     * of uint32_t -- swap them all now.
+     */
+#ifdef BSWAP_NEEDED
+    for (int i = 0; i < n / 4; i++) {
+        bswap32s(note.data + i);
+    }
+#endif
+
+    /*
+     * Note that nhdr is 3 words, and that the "name" described by namesz
+     * immediately follows nhdr and is thus at the 4th word.  Further, all
+     * of the inputs to the kernel's round_up are multiples of 4.
+     */
+    if (note.nhdr.n_type != NT_GNU_PROPERTY_TYPE_0 ||
+        note.nhdr.n_namesz != NOTE_NAME_SZ ||
+        note.data[3] != GNU0_MAGIC) {
+        error_setg(errp, "Invalid note in PT_GNU_PROPERTY");
+        return false;
+    }
+    off = sizeof(note.nhdr) + NOTE_NAME_SZ;
+
+    datasz = note.nhdr.n_descsz + off;
+    if (datasz > n) {
+        error_setg(errp, "Invalid note size in PT_GNU_PROPERTY");
+        return false;
+    }
+
+    have_prev_type = false;
+    prev_type = 0;
+    while (1) {
+        if (off == datasz) {
+            return true;  /* end, exit ok */
+        }
+        if (!parse_elf_property(note.data, &off, datasz, info,
+                                have_prev_type, &prev_type, errp)) {
+            return false;
+        }
+        have_prev_type = true;
+    }
+}
+
 /* Load an ELF image into the address space.
 
    IMAGE_NAME is the filename of the image, to use in error messages.
@@ -2319,16 +2570,17 @@ static void load_elf_image(const char *image_name, int image_fd,
     struct elfhdr *ehdr = (struct elfhdr *)bprm_buf;
     struct elf_phdr *phdr;
     abi_ulong load_addr, load_bias, loaddr, hiaddr, error;
-    int i, retval;
-    const char *errmsg;
+    int i, retval, prot_exec;
+    Error *err = NULL;
 
     /* First of all, some simple consistency checks */
-    errmsg = "Invalid ELF image for this architecture";
     if (!elf_check_ident(ehdr)) {
+        error_setg(&err, "Invalid ELF image for this architecture");
         goto exit_errmsg;
     }
     bswap_ehdr(ehdr);
     if (!elf_check_ehdr(ehdr)) {
+        error_setg(&err, "Invalid ELF image for this architecture");
         goto exit_errmsg;
     }
 
@@ -2349,22 +2601,54 @@ static void load_elf_image(const char *image_name, int image_fd,
 
     mmap_lock();
 
-    /* Find the maximum size of the image and allocate an appropriate
-       amount of memory to handle that.  */
+    /*
+     * Find the maximum size of the image and allocate an appropriate
+     * amount of memory to handle that.  Locate the interpreter, if any.
+     */
     loaddr = -1, hiaddr = 0;
     info->alignment = 0;
     for (i = 0; i < ehdr->e_phnum; ++i) {
-        if (phdr[i].p_type == PT_LOAD) {
-            abi_ulong a = phdr[i].p_vaddr - phdr[i].p_offset;
+        struct elf_phdr *eppnt = phdr + i;
+        if (eppnt->p_type == PT_LOAD) {
+            abi_ulong a = eppnt->p_vaddr - eppnt->p_offset;
             if (a < loaddr) {
                 loaddr = a;
             }
-            a = phdr[i].p_vaddr + phdr[i].p_memsz;
+            a = eppnt->p_vaddr + eppnt->p_memsz;
             if (a > hiaddr) {
                 hiaddr = a;
             }
             ++info->nsegs;
-            info->alignment |= phdr[i].p_align;
+            info->alignment |= eppnt->p_align;
+        } else if (eppnt->p_type == PT_INTERP && pinterp_name) {
+            g_autofree char *interp_name = NULL;
+
+            if (*pinterp_name) {
+                error_setg(&err, "Multiple PT_INTERP entries");
+                goto exit_errmsg;
+            }
+
+            interp_name = g_malloc(eppnt->p_filesz);
+
+            if (eppnt->p_offset + eppnt->p_filesz <= BPRM_BUF_SIZE) {
+                memcpy(interp_name, bprm_buf + eppnt->p_offset,
+                       eppnt->p_filesz);
+            } else {
+                retval = pread(image_fd, interp_name, eppnt->p_filesz,
+                               eppnt->p_offset);
+                if (retval != eppnt->p_filesz) {
+                    goto exit_read;
+                }
+            }
+            if (interp_name[eppnt->p_filesz - 1] != 0) {
+                error_setg(&err, "Invalid PT_INTERP entry");
+                goto exit_errmsg;
+            }
+            *pinterp_name = g_steal_pointer(&interp_name);
+        } else if (eppnt->p_type == PT_GNU_PROPERTY) {
+            if (!parse_elf_properties(image_fd, info, eppnt, bprm_buf, &err)) {
+                goto exit_errmsg;
+            }
         }
     }
 
@@ -2418,7 +2702,7 @@ static void load_elf_image(const char *image_name, int image_fd,
                             (ehdr->e_type == ET_EXEC ? MAP_FIXED : 0),
                             -1, 0);
     if (load_addr == -1) {
-        goto exit_perror;
+        goto exit_mmap;
     }
     load_bias = load_addr - loaddr;
 
@@ -2453,15 +2737,41 @@ static void load_elf_image(const char *image_name, int image_fd,
     info->brk = 0;
     info->elf_flags = ehdr->e_flags;
 
+    prot_exec = PROT_EXEC;
+#ifdef TARGET_AARCH64
+    /*
+     * If the BTI feature is present, this indicates that the executable
+     * pages of the startup binary should be mapped with PROT_BTI, so that
+     * branch targets are enforced.
+     *
+     * The startup binary is either the interpreter or the static executable.
+     * The interpreter is responsible for all pages of a dynamic executable.
+     *
+     * Elf notes are backward compatible to older cpus.
+     * Do not enable BTI unless it is supported.
+     */
+    if ((info->note_flags & GNU_PROPERTY_AARCH64_FEATURE_1_BTI)
+        && (pinterp_name == NULL || *pinterp_name == 0)
+        && cpu_isar_feature(aa64_bti, ARM_CPU(thread_cpu))) {
+        prot_exec |= TARGET_PROT_BTI;
+    }
+#endif
+
     for (i = 0; i < ehdr->e_phnum; i++) {
         struct elf_phdr *eppnt = phdr + i;
         if (eppnt->p_type == PT_LOAD) {
             abi_ulong vaddr, vaddr_po, vaddr_ps, vaddr_ef, vaddr_em, vaddr_len;
             int elf_prot = 0;
 
-            if (eppnt->p_flags & PF_R) elf_prot =  PROT_READ;
-            if (eppnt->p_flags & PF_W) elf_prot |= PROT_WRITE;
-            if (eppnt->p_flags & PF_X) elf_prot |= PROT_EXEC;
+            if (eppnt->p_flags & PF_R) {
+                elf_prot |= PROT_READ;
+            }
+            if (eppnt->p_flags & PF_W) {
+                elf_prot |= PROT_WRITE;
+            }
+            if (eppnt->p_flags & PF_X) {
+                elf_prot |= prot_exec;
+            }
 
             vaddr = load_bias + eppnt->p_vaddr;
             vaddr_po = TARGET_ELF_PAGEOFFSET(vaddr);
@@ -2479,7 +2789,7 @@ static void load_elf_image(const char *image_name, int image_fd,
                                     image_fd, eppnt->p_offset - vaddr_po);
 
                 if (error == -1) {
-                    goto exit_perror;
+                    goto exit_mmap;
                 }
             }
 
@@ -2507,42 +2817,15 @@ static void load_elf_image(const char *image_name, int image_fd,
                 if (vaddr_ef > info->end_data) {
                     info->end_data = vaddr_ef;
                 }
-                if (vaddr_em > info->brk) {
-                    info->brk = vaddr_em;
-                }
             }
-        } else if (eppnt->p_type == PT_INTERP && pinterp_name) {
-            char *interp_name;
-
-            if (*pinterp_name) {
-                errmsg = "Multiple PT_INTERP entries";
-                goto exit_errmsg;
+            if (vaddr_em > info->brk) {
+                info->brk = vaddr_em;
             }
-            interp_name = malloc(eppnt->p_filesz);
-            if (!interp_name) {
-                goto exit_perror;
-            }
-
-            if (eppnt->p_offset + eppnt->p_filesz <= BPRM_BUF_SIZE) {
-                memcpy(interp_name, bprm_buf + eppnt->p_offset,
-                       eppnt->p_filesz);
-            } else {
-                retval = pread(image_fd, interp_name, eppnt->p_filesz,
-                               eppnt->p_offset);
-                if (retval != eppnt->p_filesz) {
-                    goto exit_perror;
-                }
-            }
-            if (interp_name[eppnt->p_filesz - 1] != 0) {
-                errmsg = "Invalid PT_INTERP entry";
-                goto exit_errmsg;
-            }
-            *pinterp_name = interp_name;
 #ifdef TARGET_MIPS
         } else if (eppnt->p_type == PT_MIPS_ABIFLAGS) {
             Mips_elf_abiflags_v0 abiflags;
             if (eppnt->p_filesz < sizeof(Mips_elf_abiflags_v0)) {
-                errmsg = "Invalid PT_MIPS_ABIFLAGS entry";
+                error_setg(&err, "Invalid PT_MIPS_ABIFLAGS entry");
                 goto exit_errmsg;
             }
             if (eppnt->p_offset + eppnt->p_filesz <= BPRM_BUF_SIZE) {
@@ -2552,7 +2835,7 @@ static void load_elf_image(const char *image_name, int image_fd,
                 retval = pread(image_fd, &abiflags, sizeof(Mips_elf_abiflags_v0),
                                eppnt->p_offset);
                 if (retval != sizeof(Mips_elf_abiflags_v0)) {
-                    goto exit_perror;
+                    goto exit_read;
                 }
             }
             bswap_mips_abiflags(&abiflags);
@@ -2564,7 +2847,6 @@ static void load_elf_image(const char *image_name, int image_fd,
     if (info->end_data == 0) {
         info->start_data = info->end_code;
         info->end_data = info->end_code;
-        info->brk = info->end_code;
     }
 
     if (qemu_log_enabled()) {
@@ -2578,13 +2860,16 @@ static void load_elf_image(const char *image_name, int image_fd,
 
  exit_read:
     if (retval >= 0) {
-        errmsg = "Incomplete read of file header";
-        goto exit_errmsg;
+        error_setg(&err, "Incomplete read of file header");
+    } else {
+        error_setg_errno(&err, errno, "Error reading file header");
     }
- exit_perror:
-    errmsg = strerror(errno);
+    goto exit_errmsg;
+ exit_mmap:
+    error_setg_errno(&err, errno, "Error mapping file");
+    goto exit_errmsg;
  exit_errmsg:
-    fprintf(stderr, "%s: %s\n", image_name, errmsg);
+    error_reportf_err(err, "%s: ", image_name);
     exit(-1);
 }
 
@@ -2592,26 +2877,27 @@ static void load_elf_interp(const char *filename, struct image_info *info,
                             char bprm_buf[BPRM_BUF_SIZE])
 {
     int fd, retval;
+    Error *err = NULL;
 
     fd = open(path(filename), O_RDONLY);
     if (fd < 0) {
-        goto exit_perror;
+        error_setg_file_open(&err, errno, filename);
+        error_report_err(err);
+        exit(-1);
     }
 
     retval = read(fd, bprm_buf, BPRM_BUF_SIZE);
     if (retval < 0) {
-        goto exit_perror;
+        error_setg_errno(&err, errno, "Error reading file header");
+        error_reportf_err(err, "%s: ", filename);
+        exit(-1);
     }
+
     if (retval < BPRM_BUF_SIZE) {
         memset(bprm_buf + retval, 0, BPRM_BUF_SIZE - retval);
     }
 
     load_elf_image(filename, fd, info, NULL, bprm_buf);
-    return;
-
- exit_perror:
-    fprintf(stderr, "%s: %s\n", filename, strerror(errno));
-    exit(-1);
 }
 
 static int symfind(const void *s0, const void *s1)
@@ -2890,7 +3176,7 @@ int load_elf_binary(struct linux_binprm *bprm, struct image_info *info)
     if (elf_interpreter) {
         info->load_bias = interp_info.load_bias;
         info->entry = interp_info.entry;
-        free(elf_interpreter);
+        g_free(elf_interpreter);
     }
 
 #ifdef USE_ELF_CORE_DUMP
@@ -3199,7 +3485,9 @@ static abi_ulong vma_dump_size(const struct vm_area_struct *vma)
     if (vma->vma_flags & PROT_EXEC) {
         char page[TARGET_PAGE_SIZE];
 
-        copy_from_user(page, vma->vma_start, sizeof (page));
+        if (copy_from_user(page, vma->vma_start, sizeof (page))) {
+            return 0;
+        }
         if ((page[EI_MAG0] == ELFMAG0) &&
             (page[EI_MAG1] == ELFMAG1) &&
             (page[EI_MAG2] == ELFMAG2) &&

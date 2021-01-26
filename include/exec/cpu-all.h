@@ -6,7 +6,7 @@
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -176,11 +176,9 @@ extern unsigned long reserved_va;
  * avoid setting bits at the top of guest addresses that might need
  * to be used for tags.
  */
-#if MIN(TARGET_VIRT_ADDR_SPACE_BITS, TARGET_ABI_BITS) <= 32
-# define GUEST_ADDR_MAX_  UINT32_MAX
-#else
-# define GUEST_ADDR_MAX_  (~0ul)
-#endif
+#define GUEST_ADDR_MAX_                                                 \
+    ((MIN_CONST(TARGET_VIRT_ADDR_SPACE_BITS, TARGET_ABI_BITS) <= 32) ?  \
+     UINT32_MAX : ~0ul)
 #define GUEST_ADDR_MAX    (reserved_va ? reserved_va - 1 : GUEST_ADDR_MAX_)
 
 #else
@@ -191,13 +189,13 @@ extern unsigned long reserved_va;
 #define ARG1         as
 #define ARG1_DECL    AddressSpace *as
 #define TARGET_ENDIANNESS
-#include "exec/memory_ldst.inc.h"
+#include "exec/memory_ldst.h.inc"
 
 #define SUFFIX       _cached_slow
 #define ARG1         cache
 #define ARG1_DECL    MemoryRegionCache *cache
 #define TARGET_ENDIANNESS
-#include "exec/memory_ldst.inc.h"
+#include "exec/memory_ldst.h.inc"
 
 static inline void stl_phys_notdirty(AddressSpace *as, hwaddr addr, uint32_t val)
 {
@@ -209,17 +207,17 @@ static inline void stl_phys_notdirty(AddressSpace *as, hwaddr addr, uint32_t val
 #define ARG1         as
 #define ARG1_DECL    AddressSpace *as
 #define TARGET_ENDIANNESS
-#include "exec/memory_ldst_phys.inc.h"
+#include "exec/memory_ldst_phys.h.inc"
 
 /* Inline fast path for direct RAM access.  */
 #define ENDIANNESS
-#include "exec/memory_ldst_cached.inc.h"
+#include "exec/memory_ldst_cached.h.inc"
 
 #define SUFFIX       _cached
 #define ARG1         cache
 #define ARG1_DECL    MemoryRegionCache *cache
 #define TARGET_ENDIANNESS
-#include "exec/memory_ldst_phys.inc.h"
+#include "exec/memory_ldst_phys.h.inc"
 #endif
 
 /* page related stuff */
@@ -276,6 +274,8 @@ extern intptr_t qemu_host_page_mask;
 /* FIXME: Code that sets/uses this is broken and needs to go away.  */
 #define PAGE_RESERVED  0x0020
 #endif
+/* Target-specific bits that will be used via page_get_flags().  */
+#define PAGE_TARGET_1  0x0080
 
 #if defined(CONFIG_USER_ONLY)
 void page_dump(FILE *f);
@@ -409,10 +409,15 @@ static inline bool tlb_hit(target_ulong tlb_addr, target_ulong addr)
     return tlb_hit_page(tlb_addr, addr & TARGET_PAGE_MASK);
 }
 
+#ifdef CONFIG_TCG
+void dump_drift_info(void);
 void dump_exec_info(void);
 void dump_opcount_info(void);
+#endif /* CONFIG_TCG */
+
 #endif /* !CONFIG_USER_ONLY */
 
+/* Returns: 0 on success, -1 on error */
 int cpu_memory_rw_debug(CPUState *cpu, target_ulong addr,
                         void *ptr, target_ulong len, bool is_write);
 

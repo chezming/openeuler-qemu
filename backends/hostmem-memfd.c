@@ -17,13 +17,12 @@
 #include "qemu/memfd.h"
 #include "qemu/module.h"
 #include "qapi/error.h"
+#include "qom/object.h"
 
 #define TYPE_MEMORY_BACKEND_MEMFD "memory-backend-memfd"
 
-#define MEMORY_BACKEND_MEMFD(obj)                                        \
-    OBJECT_CHECK(HostMemoryBackendMemfd, (obj), TYPE_MEMORY_BACKEND_MEMFD)
+OBJECT_DECLARE_SIMPLE_TYPE(HostMemoryBackendMemfd, MEMORY_BACKEND_MEMFD)
 
-typedef struct HostMemoryBackendMemfd HostMemoryBackendMemfd;
 
 struct HostMemoryBackendMemfd {
     HostMemoryBackend parent_obj;
@@ -77,26 +76,22 @@ memfd_backend_set_hugetlbsize(Object *obj, Visitor *v, const char *name,
                               void *opaque, Error **errp)
 {
     HostMemoryBackendMemfd *m = MEMORY_BACKEND_MEMFD(obj);
-    Error *local_err = NULL;
     uint64_t value;
 
     if (host_memory_backend_mr_inited(MEMORY_BACKEND(obj))) {
-        error_setg(&local_err, "cannot change property value");
-        goto out;
+        error_setg(errp, "cannot change property value");
+        return;
     }
 
-    visit_type_size(v, name, &value, &local_err);
-    if (local_err) {
-        goto out;
+    if (!visit_type_size(v, name, &value, errp)) {
+        return;
     }
     if (!value) {
-        error_setg(&local_err, "Property '%s.%s' doesn't take value '%"
-                   PRIu64 "'", object_get_typename(obj), name, value);
-        goto out;
+        error_setg(errp, "Property '%s.%s' doesn't take value '%" PRIu64 "'",
+                   object_get_typename(obj), name, value);
+        return;
     }
     m->hugetlbsize = value;
-out:
-    error_propagate(errp, local_err);
 }
 
 static void

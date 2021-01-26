@@ -77,6 +77,7 @@ static void virtio_pmem_flush(VirtIODevice *vdev, VirtQueue *vq)
 
     if (req_data->elem.out_num < 1 || req_data->elem.in_num < 1) {
         virtio_error(vdev, "virtio-pmem request not proper");
+        virtqueue_detach_element(vq, (VirtQueueElement *)req_data, 0);
         g_free(req_data);
         return;
     }
@@ -112,9 +113,8 @@ static void virtio_pmem_realize(DeviceState *dev, Error **errp)
     }
 
     if (host_memory_backend_is_mapped(pmem->memdev)) {
-        char *path = object_get_canonical_path_component(OBJECT(pmem->memdev));
-        error_setg(errp, "can't use already busy memdev: %s", path);
-        g_free(path);
+        error_setg(errp, "can't use already busy memdev: %s",
+                   object_get_canonical_path_component(OBJECT(pmem->memdev)));
         return;
     }
 

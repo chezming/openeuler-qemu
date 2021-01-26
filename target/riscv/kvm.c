@@ -13,7 +13,7 @@
  * more details.
  *
  * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>;.
+ * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "qemu/osdep.h"
@@ -159,6 +159,12 @@ static int kvm_riscv_get_regs_csr(CPUState *cs)
     }
     env->scause = reg;
 
+    ret = kvm_get_one_reg(cs, RISCV_CSR_REG(stval), &reg);
+    if (ret) {
+        return ret;
+    }
+    env->sbadaddr = reg;
+
     ret = kvm_get_one_reg(cs, RISCV_CSR_REG(sip), &reg);
     if (ret) {
         return ret;
@@ -212,6 +218,12 @@ static int kvm_riscv_put_regs_csr(CPUState *cs)
 
     reg = env->scause;
     ret = kvm_set_one_reg(cs, RISCV_CSR_REG(scause), &reg);
+    if (ret) {
+        return ret;
+    }
+
+    reg = env->sbadaddr;
+    ret = kvm_set_one_reg(cs, RISCV_CSR_REG(stval), &reg);
     if (ret) {
         return ret;
     }
@@ -457,6 +469,7 @@ int kvm_arch_init_vcpu(CPUState *cs)
     int ret = 0;
     target_ulong isa;
     RISCVCPU *cpu = RISCV_CPU(cs);
+    CPURISCVState *env = &cpu->env;
     __u64 id;
 
     qemu_add_vm_change_state_handler(kvm_riscv_vm_state_change, cs);
@@ -466,7 +479,7 @@ int kvm_arch_init_vcpu(CPUState *cs)
     if (ret) {
         return ret;
     }
-    cpu->env.misa = isa;
+    env->misa = isa;
 
     return ret;
 }
@@ -561,9 +574,10 @@ void kvm_riscv_reset_vcpu(RISCVCPU *cpu)
     if (!kvm_enabled()) {
         return;
     }
-    env->pc = cpu->env.loader_start;
+    env->pc = cpu->env.kernel_addr;
     env->gpr[10] = kvm_arch_vcpu_id(CPU(cpu)); /* a0 */
-    env->gpr[11] = cpu->env.fdt_start;         /* a1 */
+    env->gpr[11] = cpu->env.fdt_addr;          /* a1 */
+    env->satp = 0;
 }
 
 void kvm_riscv_set_irq(RISCVCPU *cpu, int irq, int level)

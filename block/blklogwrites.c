@@ -149,10 +149,8 @@ static int blk_log_writes_open(BlockDriverState *bs, QDict *options, int flags,
     bool log_append;
 
     opts = qemu_opts_create(&runtime_opts, NULL, 0, &error_abort);
-    qemu_opts_absorb_qdict(opts, options, &local_err);
-    if (local_err) {
+    if (!qemu_opts_absorb_qdict(opts, options, errp)) {
         ret = -EINVAL;
-        error_propagate(errp, local_err);
         goto fail;
     }
 
@@ -517,7 +515,6 @@ static BlockDriver bdrv_blk_log_writes = {
     .bdrv_co_pwrite_zeroes  = blk_log_writes_co_pwrite_zeroes,
     .bdrv_co_flush_to_disk  = blk_log_writes_co_flush_to_disk,
     .bdrv_co_pdiscard       = blk_log_writes_co_pdiscard,
-    .bdrv_co_block_status   = bdrv_co_block_status_from_file,
 
     .is_filter              = true,
     .strong_runtime_opts    = blk_log_writes_strong_runtime_opts,

@@ -329,7 +329,7 @@ static void pmac_ide_write(void *opaque, hwaddr addr, uint64_t val,
     case 0x8:
     case 0x16:
         if (size == 1) {
-            ide_cmd_write(&d->bus, 0, val);
+            ide_ctrl_write(&d->bus, 0, val);
         }
         break;
     case 0x20:
@@ -376,17 +376,17 @@ static void macio_ide_reset(DeviceState *dev)
     ide_bus_reset(&d->bus);
 }
 
-static int ide_nop_int(IDEDMA *dma, bool is_write)
+static int ide_nop_int(const IDEDMA *dma, bool is_write)
 {
     return 0;
 }
 
-static int32_t ide_nop_int32(IDEDMA *dma, int32_t l)
+static int32_t ide_nop_int32(const IDEDMA *dma, int32_t l)
 {
     return 0;
 }
 
-static void ide_dbdma_start(IDEDMA *dma, IDEState *s,
+static void ide_dbdma_start(const IDEDMA *dma, IDEState *s,
                             BlockCompletionFunc *cb)
 {
     MACIOIDEState *m = container_of(dma, MACIOIDEState, dma);

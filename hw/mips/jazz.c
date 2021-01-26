@@ -24,6 +24,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu-common.h"
+#include "hw/clock.h"
 #include "hw/mips/mips.h"
 #include "hw/mips/cpudevs.h"
 #include "hw/intc/i8259.h"
@@ -142,6 +143,7 @@ static void mips_jazz_init(MachineState *machine,
     MemoryRegion *address_space = get_system_memory();
     char *filename;
     int bios_size, n;
+    Clock *cpuclk;
     MIPSCPU *cpu;
     CPUClass *cc;
     CPUMIPSState *env;
@@ -163,14 +165,25 @@ static void mips_jazz_init(MachineState *machine,
     MemoryRegion *bios2 = g_new(MemoryRegion, 1);
     SysBusESPState *sysbus_esp;
     ESPState *esp;
+    static const struct {
+        unsigned freq_hz;
+        unsigned pll_mult;
+    } ext_clk[] = {
+        [JAZZ_MAGNUM] = {50000000, 2},
+        [JAZZ_PICA61] = {33333333, 4},
+    };
 
     if (machine->ram_size > 256 * MiB) {
         error_report("RAM size more than 256Mb is not supported");
         exit(EXIT_FAILURE);
     }
 
+    cpuclk = clock_new(OBJECT(machine), "cpu-refclk");
+    clock_set_hz(cpuclk, ext_clk[jazz_model].freq_hz
+                         * ext_clk[jazz_model].pll_mult);
+
     /* init CPUs */
-    cpu = MIPS_CPU(cpu_create(machine->cpu_type));
+    cpu = mips_cpu_create_with_clock(machine->cpu_type, cpuclk);
     env = &cpu->env;
     qemu_register_reset(main_cpu_reset, cpu);
 
@@ -205,10 +218,7 @@ static void mips_jazz_init(MachineState *machine,
     memory_region_add_subregion(address_space, 0xfff00000LL, bios2);
 
     /* load the BIOS image. */
-    if (bios_name == NULL) {
-        bios_name = BIOS_FILENAME;
-    }
-    filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, bios_name);
+    filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, bios_name ?: BIOS_FILENAME);
     if (filename) {
         bios_size = load_image_targphys(filename, 0xfff00000LL,
                                         MAGNUM_BIOS_SIZE);
@@ -216,7 +226,8 @@ static void mips_jazz_init(MachineState *machine,
     } else {
         bios_size = -1;
     }
-    if ((bios_size < 0 || bios_size > MAGNUM_BIOS_SIZE) && !qtest_enabled()) {
+    if ((bios_size < 0 || bios_size > MAGNUM_BIOS_SIZE)
+        && bios_name && !qtest_enabled()) {
         error_report("Could not load MIPS bios '%s'", bios_name);
         exit(1);
     }
@@ -250,14 +261,14 @@ static void mips_jazz_init(MachineState *machine,
     isa_bus_irqs(isa_bus, i8259);
     i8257_dma_init(isa_bus, 0);
     pit = i8254_pit_init(isa_bus, 0x40, 0, NULL);
-    pcspk_init(isa_bus, pit);
+    pcspk_init(isa_new(TYPE_PC_SPEAKER), isa_bus, pit);
 
     /* Video card */
     switch (jazz_model) {
     case JAZZ_MAGNUM:
-        dev = qdev_create(NULL, "sysbus-g364");
-        qdev_init_nofail(dev);
+        dev = qdev_new("sysbus-g364");
         sysbus = SYS_BUS_DEVICE(dev);
+        sysbus_realize_and_unref(sysbus, &error_fatal);
         sysbus_mmio_map(sysbus, 0, 0x60080000);
         sysbus_mmio_map(sysbus, 1, 0x40000000);
         sysbus_connect_irq(sysbus, 0, qdev_get_gpio_in(rc4030, 3));
@@ -287,13 +298,13 @@ static void mips_jazz_init(MachineState *machine,
         if (strcmp(nd->model, "dp83932") == 0) {
             qemu_check_nic_model(nd, "dp83932");
 
-            dev = qdev_create(NULL, "dp8393x");
+            dev = qdev_new("dp8393x");
             qdev_set_nic_properties(dev, nd);
             qdev_prop_set_uint8(dev, "it_shift", 2);
-            object_property_set_link(OBJECT(dev), OBJECT(rc4030_dma_mr),
-                                     "dma_mr", &error_abort);
-            qdev_init_nofail(dev);
+            object_property_set_link(OBJECT(dev), "dma_mr",
+                                     OBJECT(rc4030_dma_mr), &error_abort);
             sysbus = SYS_BUS_DEVICE(dev);
+            sysbus_realize_and_unref(sysbus, &error_fatal);
             sysbus_mmio_map(sysbus, 0, 0x80001000);
             sysbus_mmio_map(sysbus, 1, 0x8000b000);
             sysbus_connect_irq(sysbus, 0, qdev_get_gpio_in(rc4030, 4));
@@ -308,8 +319,8 @@ static void mips_jazz_init(MachineState *machine,
     }
 
     /* SCSI adapter */
-    dev = qdev_create(NULL, TYPE_ESP);
-    sysbus_esp = ESP_STATE(dev);
+    dev = qdev_new(TYPE_ESP);
+    sysbus_esp = ESP(dev);
     esp = &sysbus_esp->esp;
     esp->dma_memory_read = rc4030_dma_read;
     esp->dma_memory_write = rc4030_dma_write;
@@ -317,9 +328,9 @@ static void mips_jazz_init(MachineState *machine,
     sysbus_esp->it_shift = 0;
     /* XXX for now until rc4030 has been changed to use DMA enable signal */
     esp->dma_enabled = 1;
-    qdev_init_nofail(dev);
 
     sysbus = SYS_BUS_DEVICE(dev);
+    sysbus_realize_and_unref(sysbus, &error_fatal);
     sysbus_connect_irq(sysbus, 0, qdev_get_gpio_in(rc4030, 5));
     sysbus_mmio_map(sysbus, 0, 0x80002000);
 
@@ -362,9 +373,9 @@ static void mips_jazz_init(MachineState *machine,
     /* FIXME: missing Jazz sound at 0x8000c000, rc4030[2] */
 
     /* NVRAM */
-    dev = qdev_create(NULL, "ds1225y");
-    qdev_init_nofail(dev);
+    dev = qdev_new("ds1225y");
     sysbus = SYS_BUS_DEVICE(dev);
+    sysbus_realize_and_unref(sysbus, &error_fatal);
     sysbus_mmio_map(sysbus, 0, 0x80009000);
 
     /* LED indicator */

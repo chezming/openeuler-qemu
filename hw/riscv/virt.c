@@ -30,27 +30,24 @@
 #include "hw/char/serial.h"
 #include "target/riscv/cpu.h"
 #include "hw/riscv/riscv_hart.h"
-#include "hw/riscv/sifive_plic.h"
-#include "hw/riscv/sifive_clint.h"
-#include "hw/riscv/sifive_test.h"
 #include "hw/riscv/virt.h"
 #include "hw/riscv/boot.h"
 #include "hw/riscv/numa.h"
+#include "hw/intc/sifive_clint.h"
+#include "hw/intc/sifive_plic.h"
+#include "hw/misc/sifive_test.h"
 #include "chardev/char.h"
 #include "sysemu/arch_init.h"
 #include "sysemu/device_tree.h"
 #include "sysemu/sysemu.h"
-#include "exec/address-spaces.h"
 #include "hw/pci/pci.h"
 #include "hw/pci-host/gpex.h"
 #include "sysemu/kvm.h"
 
-#include <libfdt.h>
-
 #if defined(TARGET_RISCV32)
-# define BIOS_FILENAME "opensbi-riscv32-virt-fw_jump.bin"
+# define BIOS_FILENAME "opensbi-riscv32-generic-fw_dynamic.bin"
 #else
-# define BIOS_FILENAME "opensbi-riscv64-virt-fw_jump.bin"
+# define BIOS_FILENAME "opensbi-riscv64-generic-fw_dynamic.bin"
 #endif
 
 static const struct MemmapEntry {
@@ -58,18 +55,18 @@ static const struct MemmapEntry {
     hwaddr size;
 } virt_memmap[] = {
     [VIRT_DEBUG] =       {        0x0,         0x100 },
-    [VIRT_MROM] =        {     0x1000,       0x11000 },
+    [VIRT_MROM] =        {     0x1000,        0xf000 },
     [VIRT_TEST] =        {   0x100000,        0x1000 },
     [VIRT_RTC] =         {   0x101000,        0x1000 },
     [VIRT_CLINT] =       {  0x2000000,       0x10000 },
+    [VIRT_PCIE_PIO] =    {  0x3000000,       0x10000 },
     [VIRT_PLIC] =        {  0xc000000, VIRT_PLIC_SIZE(VIRT_CPUS_MAX * 2) },
     [VIRT_UART0] =       { 0x10000000,         0x100 },
     [VIRT_VIRTIO] =      { 0x10001000,        0x1000 },
     [VIRT_FLASH] =       { 0x20000000,     0x4000000 },
-    [VIRT_DRAM] =        { 0x80000000,           0x0 },
-    [VIRT_PCIE_MMIO] =   { 0x40000000,    0x40000000 },
-    [VIRT_PCIE_PIO] =    { 0x03000000,    0x00010000 },
     [VIRT_PCIE_ECAM] =   { 0x30000000,    0x10000000 },
+    [VIRT_PCIE_MMIO] =   { 0x40000000,    0x40000000 },
+    [VIRT_DRAM] =        { 0x80000000,           0x0 },
 };
 
 #define VIRT_FLASH_SECTOR_SIZE (256 * KiB)
@@ -82,7 +79,7 @@ static PFlashCFI01 *virt_flash_create1(RISCVVirtState *s,
      * Create a single flash device.  We use the same parameters as
      * the flash devices on the ARM virt board.
      */
-    DeviceState *dev = qdev_create(NULL, TYPE_PFLASH_CFI01);
+    DeviceState *dev = qdev_new(TYPE_PFLASH_CFI01);
 
     qdev_prop_set_uint64(dev, "sector-length", VIRT_FLASH_SECTOR_SIZE);
     qdev_prop_set_uint8(dev, "width", 4);
@@ -116,7 +113,7 @@ static void virt_flash_map1(PFlashCFI01 *flash,
     assert(QEMU_IS_ALIGNED(size, VIRT_FLASH_SECTOR_SIZE));
     assert(size / VIRT_FLASH_SECTOR_SIZE <= UINT32_MAX);
     qdev_prop_set_uint32(dev, "num-blocks", size / VIRT_FLASH_SECTOR_SIZE);
-    qdev_init_nofail(dev);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
 
     memory_region_add_subregion(sysmem, base,
                                 sysbus_mmio_get_region(SYS_BUS_DEVICE(dev),
@@ -185,6 +182,7 @@ static void create_fdt(RISCVVirtState *s, const struct MemmapEntry *memmap,
 {
     void *fdt;
     int i, cpu, socket;
+    const char *dtb_filename;
     MachineState *mc = MACHINE(s);
     uint64_t addr, size;
     uint32_t *clint_cells, *plic_cells;
@@ -198,10 +196,20 @@ static void create_fdt(RISCVVirtState *s, const struct MemmapEntry *memmap,
     hwaddr flashsize = virt_memmap[VIRT_FLASH].size / 2;
     hwaddr flashbase = virt_memmap[VIRT_FLASH].base;
 
-    fdt = s->fdt = create_device_tree(&s->fdt_size);
-    if (!fdt) {
-        error_report("create_device_tree() failed");
-        exit(1);
+    dtb_filename = qemu_opt_get(qemu_get_machine_opts(), "dtb");
+    if (dtb_filename) {
+        fdt = s->fdt = load_device_tree(dtb_filename, &s->fdt_size);
+        if (!fdt) {
+            error_report("load_device_tree() failed");
+            exit(1);
+        }
+        goto update_bootargs;
+    } else {
+        fdt = s->fdt = create_device_tree(&s->fdt_size);
+        if (!fdt) {
+            error_report("create_device_tree() failed");
+            exit(1);
+        }
     }
 
     qemu_fdt_setprop_string(fdt, "/", "model", "riscv-virtio,qemu");
@@ -422,9 +430,6 @@ static void create_fdt(RISCVVirtState *s, const struct MemmapEntry *memmap,
 
     qemu_fdt_add_subnode(fdt, "/chosen");
     qemu_fdt_setprop_string(fdt, "/chosen", "stdout-path", name);
-    if (cmdline) {
-        qemu_fdt_setprop_string(fdt, "/chosen", "bootargs", cmdline);
-    }
     g_free(name);
 
     name = g_strdup_printf("/soc/rtc@%lx", (long)memmap[VIRT_RTC].base);
@@ -445,6 +450,11 @@ static void create_fdt(RISCVVirtState *s, const struct MemmapEntry *memmap,
                                  2, flashbase + flashsize, 2, flashsize);
     qemu_fdt_setprop_cell(s->fdt, name, "bank-width", 4);
     g_free(name);
+
+update_bootargs:
+    if (cmdline) {
+        qemu_fdt_setprop_string(fdt, "/chosen", "bootargs", cmdline);
+    }
 }
 
 static inline DeviceState *gpex_pcie_init(MemoryRegion *sys_mem,
@@ -459,9 +469,9 @@ static inline DeviceState *gpex_pcie_init(MemoryRegion *sys_mem,
     qemu_irq irq;
     int i;
 
-    dev = qdev_create(NULL, TYPE_GPEX_HOST);
+    dev = qdev_new(TYPE_GPEX_HOST);
 
-    qdev_init_nofail(dev);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
 
     ecam_alias = g_new0(MemoryRegion, 1);
     ecam_reg = sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), 0);
@@ -487,7 +497,7 @@ static inline DeviceState *gpex_pcie_init(MemoryRegion *sys_mem,
     return dev;
 }
 
-static void riscv_virt_board_init(MachineState *machine)
+static void virt_machine_init(MachineState *machine)
 {
     const struct MemmapEntry *memmap = virt_memmap;
     RISCVVirtState *s = RISCV_VIRT_MACHINE(machine);
@@ -497,10 +507,11 @@ static void riscv_virt_board_init(MachineState *machine)
     char *plic_hart_config, *soc_name;
     size_t plic_hart_config_len;
     target_ulong start_addr = memmap[VIRT_DRAM].base;
+    target_ulong firmware_end_addr, kernel_start_addr;
+    uint32_t fdt_load_addr;
+    uint64_t kernel_entry;
     DeviceState *mmio_plic, *virtio_plic, *pcie_plic;
     int i, j, base_hartid, hart_count;
-    uint64_t kernel_entry = 0;
-    hwaddr start_fdt;
     CPUState *cs;
 
     /* Check socket count limit */
@@ -532,22 +543,22 @@ static void riscv_virt_board_init(MachineState *machine)
 
         soc_name = g_strdup_printf("soc%d", i);
         object_initialize_child(OBJECT(machine), soc_name, &s->soc[i],
-            sizeof(s->soc[i]), TYPE_RISCV_HART_ARRAY, &error_abort, NULL);
+                                TYPE_RISCV_HART_ARRAY);
         g_free(soc_name);
-        object_property_set_str(OBJECT(&s->soc[i]),
-            machine->cpu_type, "cpu-type", &error_abort);
-        object_property_set_int(OBJECT(&s->soc[i]),
-            base_hartid, "hartid-base", &error_abort);
-        object_property_set_int(OBJECT(&s->soc[i]),
-            hart_count, "num-harts", &error_abort);
-        object_property_set_bool(OBJECT(&s->soc[i]),
-            true, "realized", &error_abort);
+        object_property_set_str(OBJECT(&s->soc[i]), "cpu-type",
+                                machine->cpu_type, &error_abort);
+        object_property_set_int(OBJECT(&s->soc[i]), "hartid-base",
+                                base_hartid, &error_abort);
+        object_property_set_int(OBJECT(&s->soc[i]), "num-harts",
+                                hart_count, &error_abort);
+        sysbus_realize(SYS_BUS_DEVICE(&s->soc[i]), &error_abort);
 
         /* Per-socket CLINT */
         sifive_clint_create(
             memmap[VIRT_CLINT].base + i * memmap[VIRT_CLINT].size,
             memmap[VIRT_CLINT].size, base_hartid, hart_count,
-            SIFIVE_SIP_BASE, SIFIVE_TIMECMP_BASE, SIFIVE_TIME_BASE, true);
+            SIFIVE_SIP_BASE, SIFIVE_TIMECMP_BASE, SIFIVE_TIME_BASE,
+            SIFIVE_CLINT_TIMEBASE_FREQ, true);
 
         /* Per-socket PLIC hart topology configuration string */
         plic_hart_config_len =
@@ -607,12 +618,15 @@ static void riscv_virt_board_init(MachineState *machine)
     memory_region_add_subregion(system_memory, memmap[VIRT_MROM].base,
                                 mask_rom);
 
-    riscv_find_and_load_firmware(machine, BIOS_FILENAME,
-                                 memmap[VIRT_DRAM].base, NULL);
+    firmware_end_addr = riscv_find_and_load_firmware(machine, BIOS_FILENAME,
+                                                     start_addr, NULL);
 
     if (machine->kernel_filename) {
+        kernel_start_addr = riscv_calc_kernel_start_addr(machine,
+                                                         firmware_end_addr);
+
         kernel_entry = riscv_load_kernel(machine->kernel_filename,
-                                                  NULL);
+                                         kernel_start_addr, NULL);
 
         if (machine->initrd_filename) {
             hwaddr start;
@@ -624,6 +638,12 @@ static void riscv_virt_board_init(MachineState *machine)
             qemu_fdt_setprop_cell(s->fdt, "/chosen", "linux,initrd-end",
                                   end);
         }
+    } else {
+       /*
+        * If dynamic firmware is used, it doesn't know where is the next mode
+        * if kernel argument is not set.
+        */
+        kernel_entry = 0;
     }
 
     if (drive_get(IF_PFLASH, 0, 0)) {
@@ -634,46 +654,18 @@ static void riscv_virt_board_init(MachineState *machine)
         start_addr = virt_memmap[VIRT_FLASH].base;
     }
 
-    /* reset vector */
-    uint32_t reset_vec[8] = {
-        0x00000297,                  /* 1:  auipc  t0, %pcrel_hi(dtb) */
-        0x02028593,                  /*     addi   a1, t0, %pcrel_lo(1b) */
-        0xf1402573,                  /*     csrr   a0, mhartid  */
-#if defined(TARGET_RISCV32)
-        0x0182a283,                  /*     lw     t0, 24(t0) */
-#elif defined(TARGET_RISCV64)
-        0x0182b283,                  /*     ld     t0, 24(t0) */
-#endif
-        0x00028067,                  /*     jr     t0 */
-        0x00000000,
-        start_addr,                  /* start: .dword */
-        0x00000000,
-                                     /* dtb: */
-    };
-
-    /* copy in the reset vector in little_endian byte order */
-    for (i = 0; i < sizeof(reset_vec) >> 2; i++) {
-        reset_vec[i] = cpu_to_le32(reset_vec[i]);
-    }
-    rom_add_blob_fixed_as("mrom.reset", reset_vec, sizeof(reset_vec),
-                          memmap[VIRT_MROM].base, &address_space_memory);
-
-    /* copy in the device tree */
-    if (fdt_pack(s->fdt) || fdt_totalsize(s->fdt) >
-            memmap[VIRT_MROM].size - sizeof(reset_vec)) {
-        error_report("not enough space to store device-tree");
-        exit(1);
-    }
-    qemu_fdt_dumpdtb(s->fdt, fdt_totalsize(s->fdt));
-    start_fdt = memmap[VIRT_MROM].base + sizeof(reset_vec);
-    rom_add_blob_fixed_as("mrom.fdt", s->fdt, fdt_totalsize(s->fdt),
-                          start_fdt,
-                          &address_space_memory);
+    /* Compute the fdt load address in dram */
+    fdt_load_addr = riscv_load_fdt(memmap[VIRT_DRAM].base,
+                                   machine->ram_size, s->fdt);
+    /* load the reset vector */
+    riscv_setup_rom_reset_vec(start_addr, virt_memmap[VIRT_MROM].base,
+                              virt_memmap[VIRT_MROM].size, kernel_entry,
+                              fdt_load_addr, s->fdt);
 
     for (cs = first_cpu; cs; cs = CPU_NEXT(cs)) {
         RISCVCPU *riscv_cpu = RISCV_CPU(cs);
-        riscv_cpu->env.loader_start = kernel_entry;
-        riscv_cpu->env.fdt_start = start_fdt;
+        riscv_cpu->env.kernel_addr = kernel_entry;
+        riscv_cpu->env.fdt_addr = fdt_load_addr;
     }
 
     /* SiFive Test MMIO device */
@@ -711,16 +703,16 @@ static void riscv_virt_board_init(MachineState *machine)
     virt_flash_map(s, system_memory);
 }
 
-static void riscv_virt_machine_instance_init(Object *obj)
+static void virt_machine_instance_init(Object *obj)
 {
 }
 
-static void riscv_virt_machine_class_init(ObjectClass *oc, void *data)
+static void virt_machine_class_init(ObjectClass *oc, void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
 
     mc->desc = "RISC-V VirtIO board";
-    mc->init = riscv_virt_board_init;
+    mc->init = virt_machine_init;
     mc->max_cpus = VIRT_CPUS_MAX;
     mc->default_cpu_type = VIRT_CPU;
     mc->pci_allow_0_address = true;
@@ -730,17 +722,17 @@ static void riscv_virt_machine_class_init(ObjectClass *oc, void *data)
     mc->numa_mem_supported = true;
 }
 
-static const TypeInfo riscv_virt_machine_typeinfo = {
+static const TypeInfo virt_machine_typeinfo = {
     .name       = MACHINE_TYPE_NAME("virt"),
     .parent     = TYPE_MACHINE,
-    .class_init = riscv_virt_machine_class_init,
-    .instance_init = riscv_virt_machine_instance_init,
+    .class_init = virt_machine_class_init,
+    .instance_init = virt_machine_instance_init,
     .instance_size = sizeof(RISCVVirtState),
 };
 
-static void riscv_virt_machine_init_register_types(void)
+static void virt_machine_init_register_types(void)
 {
-    type_register_static(&riscv_virt_machine_typeinfo);
+    type_register_static(&virt_machine_typeinfo);
 }
 
-type_init(riscv_virt_machine_init_register_types)
+type_init(virt_machine_init_register_types)

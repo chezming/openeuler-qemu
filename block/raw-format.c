@@ -74,14 +74,11 @@ static QemuOptsList raw_create_opts = {
 static int raw_read_options(QDict *options, uint64_t *offset, bool *has_size,
                             uint64_t *size, Error **errp)
 {
-    Error *local_err = NULL;
     QemuOpts *opts = NULL;
     int ret;
 
     opts = qemu_opts_create(&raw_runtime_opts, NULL, 0, &error_abort);
-    qemu_opts_absorb_qdict(opts, options, &local_err);
-    if (local_err) {
-        error_propagate(errp, local_err);
+    if (!qemu_opts_absorb_qdict(opts, options, errp)) {
         ret = -EINVAL;
         goto end;
     }
@@ -359,7 +356,7 @@ static BlockMeasureInfo *raw_measure(QemuOpts *opts, BlockDriverState *in_bs,
                             BDRV_SECTOR_SIZE);
     }
 
-    info = g_new(BlockMeasureInfo, 1);
+    info = g_new0(BlockMeasureInfo, 1);
     info->required = required;
 
     /* Unallocated sectors count towards the file size in raw images */

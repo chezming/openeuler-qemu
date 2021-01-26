@@ -162,6 +162,10 @@ Parameters to convert subcommand:
 
 .. program:: qemu-img-convert
 
+.. option:: --bitmaps
+
+  Additionally copy all persistent bitmaps from the top layer of the source
+
 .. option:: -n
 
   Skip the creation of the target volume
@@ -183,6 +187,10 @@ Parameters to convert subcommand:
   but will not automatically sparsify zero sectors, and may result in a fully
   allocated target image depending on the host support for getting allocation
   information.
+
+.. option:: -r
+
+   Rate limit for the convert process
 
 .. option:: --salvage
 
@@ -249,10 +257,17 @@ Command description:
 
 .. program:: qemu-img-commands
 
-.. option:: amend [--object OBJECTDEF] [--image-opts] [-p] [-q] [-f FMT] [-t CACHE] -o OPTIONS FILENAME
+.. option:: amend [--object OBJECTDEF] [--image-opts] [-p] [-q] [-f FMT] [-t CACHE] [--force] -o OPTIONS FILENAME
 
   Amends the image format specific *OPTIONS* for the image file
   *FILENAME*. Not all file formats support this operation.
+
+  The set of options that can be amended are dependent on the image
+  format, but note that amending the backing chain relationship should
+  instead be performed with ``qemu-img rebase``.
+
+  --force allows some unsafe operations. Currently for -f luks, it allows to
+  erase the last encryption key, and to overwrite an active encryption key.
 
 .. option:: bench [-c COUNT] [-d DEPTH] [-f FMT] [--flush-interval=FLUSH_INTERVAL] [-i AIO] [-n] [--no-drain] [-o OFFSET] [--pattern=PATTERN] [-q] [-s BUFFER_SIZE] [-S STEP_SIZE] [-t CACHE] [-w] [-U] FILENAME
 
@@ -296,7 +311,7 @@ Command description:
 
   ``--disable`` to change *BITMAP* to stop recording future edits.
 
-  ``--merge`` to merge the contents of *SOURCE_BITMAP* into *BITMAP*.
+  ``--merge`` to merge the contents of the *SOURCE* bitmap into *BITMAP*.
 
   Additional options include ``-g`` which sets a non-default
   *GRANULARITY* for ``--add``, and ``-b`` and ``-F`` which select an
@@ -338,7 +353,7 @@ Command description:
   state after (the attempt at) repairing it. That is, a successful ``-r all``
   will yield the exit code 0, independently of the image state before.
 
-.. option:: commit [--object OBJECTDEF] [--image-opts] [-q] [-f FMT] [-t CACHE] [-b BASE] [-d] [-p] FILENAME
+.. option:: commit [--object OBJECTDEF] [--image-opts] [-q] [-f FMT] [-t CACHE] [-b BASE] [-r RATE_LIMIT] [-d] [-p] FILENAME
 
   Commit the changes recorded in *FILENAME* in its base image or backing file.
   If the backing file is smaller than the snapshot, then the backing file will be
@@ -359,6 +374,8 @@ Command description:
   all images between *BASE* and the top image will be invalid and may return
   garbage data when read. For this reason, ``-b`` implies ``-d`` (so that
   the top image stays valid).
+
+  The rate limit for the commit process is specified by ``-r``.
 
 .. option:: compare [--object OBJECTDEF] [--image-opts] [-f FMT] [-F FMT] [-T SRC_CACHE] [-p] [-q] [-s] [-U] FILENAME1 FILENAME2
 
@@ -397,7 +414,7 @@ Command description:
   4
     Error on reading data
 
-.. option:: convert [--object OBJECTDEF] [--image-opts] [--target-image-opts] [--target-is-zero] [-U] [-C] [-c] [-p] [-q] [-n] [-f FMT] [-t CACHE] [-T SRC_CACHE] [-O OUTPUT_FMT] [-B BACKING_FILE] [-o OPTIONS] [-l SNAPSHOT_PARAM] [-S SPARSE_SIZE] [-m NUM_COROUTINES] [-W] FILENAME [FILENAME2 [...]] OUTPUT_FILENAME
+.. option:: convert [--object OBJECTDEF] [--image-opts] [--target-image-opts] [--target-is-zero] [--bitmaps] [-U] [-C] [-c] [-p] [-q] [-n] [-f FMT] [-t CACHE] [-T SRC_CACHE] [-O OUTPUT_FMT] [-B BACKING_FILE] [-o OPTIONS] [-l SNAPSHOT_PARAM] [-S SPARSE_SIZE] [-r RATE_LIMIT] [-m NUM_COROUTINES] [-W] FILENAME [FILENAME2 [...]] OUTPUT_FILENAME
 
   Convert the disk image *FILENAME* or a snapshot *SNAPSHOT_PARAM*
   to disk image *OUTPUT_FILENAME* using format *OUTPUT_FMT*. It can
@@ -616,6 +633,7 @@ Command description:
 
     required size: 524288
     fully allocated size: 1074069504
+    bitmaps size: 0
 
   The ``required size`` is the file size of the new image.  It may be smaller
   than the virtual disk size if the image format supports compact representation.
@@ -624,6 +642,12 @@ Command description:
   been written to all sectors.  This is the maximum size that the image file can
   occupy with the exception of internal snapshots, dirty bitmaps, vmstate data,
   and other advanced image format features.
+
+  The ``bitmaps size`` is the additional size required in order to
+  copy bitmaps from a source image in addition to the guest-visible
+  data; the line is omitted if either source or destination lacks
+  bitmap support, or 0 if bitmaps are supported but there is nothing
+  to copy.
 
 .. option:: snapshot [--object OBJECTDEF] [--image-opts] [-U] [-q] [-l | -a SNAPSHOT | -c SNAPSHOT | -d SNAPSHOT] FILENAME
 

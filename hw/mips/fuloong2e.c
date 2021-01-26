@@ -23,6 +23,7 @@
 #include "qemu/units.h"
 #include "qapi/error.h"
 #include "cpu.h"
+#include "hw/clock.h"
 #include "hw/intc/i8259.h"
 #include "hw/dma/i8257.h"
 #include "hw/isa/superio.h"
@@ -107,7 +108,7 @@ static void GCC_FMT_ATTR(3, 4) prom_set(uint32_t *prom_buf, int index,
 
 static int64_t load_kernel(CPUMIPSState *env)
 {
-    int64_t kernel_entry, kernel_low, kernel_high, initrd_size;
+    int64_t kernel_entry, kernel_high, initrd_size;
     int index = 0;
     long kernel_size;
     ram_addr_t initrd_offset;
@@ -116,9 +117,9 @@ static int64_t load_kernel(CPUMIPSState *env)
 
     kernel_size = load_elf(loaderparams.kernel_filename, NULL,
                            cpu_mips_kseg0_to_phys, NULL,
-                           (uint64_t *)&kernel_entry,
-                           (uint64_t *)&kernel_low, (uint64_t *)&kernel_high,
-                           NULL, 0, EM_MIPS, 1, 0);
+                           (uint64_t *)&kernel_entry, NULL,
+                           (uint64_t *)&kernel_high, NULL,
+                           0, EM_MIPS, 1, 0);
     if (kernel_size < 0) {
         error_report("could not load kernel '%s': %s",
                      loaderparams.kernel_filename,
@@ -132,8 +133,7 @@ static int64_t load_kernel(CPUMIPSState *env)
     if (loaderparams.initrd_filename) {
         initrd_size = get_image_size(loaderparams.initrd_filename);
         if (initrd_size > 0) {
-            initrd_offset = (kernel_high + ~INITRD_PAGE_MASK) &
-                            INITRD_PAGE_MASK;
+            initrd_offset = ROUND_UP(kernel_high, INITRD_PAGE_SIZE);
             if (initrd_offset + initrd_size > ram_size) {
                 error_report("memory too small for initial ram disk '%s'",
                              loaderparams.initrd_filename);
@@ -240,10 +240,7 @@ static void vt82c686b_southbridge_init(PCIBus *pci_bus, int slot, qemu_irq intc,
     PCIDevice *dev;
 
     isa_bus = vt82c686b_isa_init(pci_bus, PCI_DEVFN(slot, 0));
-    if (!isa_bus) {
-        fprintf(stderr, "vt82c686b_init error\n");
-        exit(1);
-    }
+    assert(isa_bus);
     *p_isa_bus = isa_bus;
     /* Interrupt controller */
     /* The 8259 -> IP5  */
@@ -297,15 +294,20 @@ static void mips_fuloong2e_init(MachineState *machine)
     long bios_size;
     uint8_t *spd_data;
     int64_t kernel_entry;
+    PCIDevice *pci_dev;
     PCIBus *pci_bus;
     ISABus *isa_bus;
     I2CBus *smbus;
+    Clock *cpuclk;
     MIPSCPU *cpu;
     CPUMIPSState *env;
     DeviceState *dev;
 
+    cpuclk = clock_new(OBJECT(machine), "cpu-refclk");
+    clock_set_hz(cpuclk, 533080000); /* ~533 MHz */
+
     /* init CPUs */
-    cpu = MIPS_CPU(cpu_create(machine->cpu_type));
+    cpu = mips_cpu_create_with_clock(machine->cpu_type, cpuclk);
     env = &cpu->env;
 
     qemu_register_reset(main_cpu_reset, cpu);
@@ -335,10 +337,8 @@ static void mips_fuloong2e_init(MachineState *machine)
         kernel_entry = load_kernel(env);
         write_bootloader(env, memory_region_get_ram_ptr(bios), kernel_entry);
     } else {
-        if (bios_name == NULL) {
-                bios_name = FULOONG_BIOSNAME;
-        }
-        filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, bios_name);
+        filename = qemu_find_file(QEMU_FILE_TYPE_BIOS,
+                                  bios_name ?: FULOONG_BIOSNAME);
         if (filename) {
             bios_size = load_image_targphys(filename, 0x1fc00000LL,
                                             BIOS_SIZE);
@@ -348,7 +348,7 @@ static void mips_fuloong2e_init(MachineState *machine)
         }
 
         if ((bios_size < 0 || bios_size > BIOS_SIZE) &&
-            !kernel_filename && !qtest_enabled()) {
+            bios_name && !qtest_enabled()) {
             error_report("Could not load MIPS bios '%s'", bios_name);
             exit(1);
         }
@@ -367,10 +367,11 @@ static void mips_fuloong2e_init(MachineState *machine)
 
     /* GPU */
     if (vga_interface_type != VGA_NONE) {
-        dev = DEVICE(pci_create(pci_bus, -1, "ati-vga"));
+        pci_dev = pci_new(-1, "ati-vga");
+        dev = DEVICE(pci_dev);
         qdev_prop_set_uint32(dev, "vgamem_mb", 16);
         qdev_prop_set_uint16(dev, "x-device-id", 0x5159);
-        qdev_init_nofail(dev);
+        pci_realize_and_unref(pci_dev, pci_bus, &error_fatal);
     }
 
     /* Populate SPD eeprom data */
@@ -392,6 +393,7 @@ static void mips_fuloong2e_machine_init(MachineClass *mc)
     mc->default_cpu_type = MIPS_CPU_TYPE_NAME("Loongson-2E");
     mc->default_ram_size = 256 * MiB;
     mc->default_ram_id = "fuloong2e.ram";
+    mc->minimum_page_bits = 14;
 }
 
 DEFINE_MACHINE("fuloong2e", mips_fuloong2e_machine_init)

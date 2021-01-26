@@ -22,23 +22,85 @@
 #include "hw/sysbus.h"
 #include "sysemu/numa.h"
 
+/**
+ * riscv_socket_count:
+ * @ms: pointer to machine state
+ *
+ * Returns: number of sockets for a numa system and 1 for a non-numa system
+ */
 int riscv_socket_count(const MachineState *ms);
 
+/**
+ * riscv_socket_first_hartid:
+ * @ms: pointer to machine state
+ * @socket_id: socket index
+ *
+ * Returns: first hartid for a valid socket and -1 for an invalid socket
+ */
 int riscv_socket_first_hartid(const MachineState *ms, int socket_id);
 
+/**
+ * riscv_socket_last_hartid:
+ * @ms: pointer to machine state
+ * @socket_id: socket index
+ *
+ * Returns: last hartid for a valid socket and -1 for an invalid socket
+ */
 int riscv_socket_last_hartid(const MachineState *ms, int socket_id);
 
+/**
+ * riscv_socket_hart_count:
+ * @ms: pointer to machine state
+ * @socket_id: socket index
+ *
+ * Returns: number of harts for a valid socket and -1 for an invalid socket
+ */
 int riscv_socket_hart_count(const MachineState *ms, int socket_id);
 
+/**
+ * riscv_socket_mem_offset:
+ * @ms: pointer to machine state
+ * @socket_id: socket index
+ *
+ * Returns: offset of ram belonging to given socket
+ */
 uint64_t riscv_socket_mem_offset(const MachineState *ms, int socket_id);
 
+/**
+ * riscv_socket_mem_size:
+ * @ms: pointer to machine state
+ * @socket_id: socket index
+ *
+ * Returns: size of ram belonging to given socket
+ */
 uint64_t riscv_socket_mem_size(const MachineState *ms, int socket_id);
 
+/**
+ * riscv_socket_check_hartids:
+ * @ms: pointer to machine state
+ * @socket_id: socket index
+ *
+ * Returns: true if hardids belonging to given socket are contiguous else false
+ */
 bool riscv_socket_check_hartids(const MachineState *ms, int socket_id);
 
+/**
+ * riscv_socket_fdt_write_id:
+ * @ms: pointer to machine state
+ * @socket_id: socket index
+ *
+ * Write NUMA node-id FDT property for given FDT node
+ */
 void riscv_socket_fdt_write_id(const MachineState *ms, void *fdt,
                                const char *node_name, int socket_id);
 
+/**
+ * riscv_socket_fdt_write_distance_matrix:
+ * @ms: pointer to machine state
+ * @socket_id: socket index
+ *
+ * Write NUMA distance matrix in FDT for given machine
+ */
 void riscv_socket_fdt_write_distance_matrix(const MachineState *ms, void *fdt);
 
 CpuInstanceProperties

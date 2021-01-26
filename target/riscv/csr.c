@@ -46,11 +46,23 @@ void riscv_set_csr_ops(int csrno, riscv_csr_operations *ops)
 static int fs(CPURISCVState *env, int csrno)
 {
 #if !defined(CONFIG_USER_ONLY)
+    /* loose check condition for fcsr in vector extension */
+    if ((csrno == CSR_FCSR) && (env->misa & RVV)) {
+        return 0;
+    }
     if (!env->debugger && !riscv_cpu_fp_enabled(env)) {
         return -RISCV_EXCP_ILLEGAL_INST;
     }
 #endif
     return 0;
+}
+
+static int vs(CPURISCVState *env, int csrno)
+{
+    if (env->misa & RVV) {
+        return 0;
+    }
+    return -1;
 }
 
 static int ctr(CPURISCVState *env, int csrno)
@@ -67,43 +79,51 @@ static int ctr(CPURISCVState *env, int csrno)
     if (riscv_cpu_virt_enabled(env)) {
         switch (csrno) {
         case CSR_CYCLE:
-            if (!get_field(env->hcounteren, HCOUNTEREN_CY)) {
+            if (!get_field(env->hcounteren, HCOUNTEREN_CY) &&
+                get_field(env->mcounteren, HCOUNTEREN_CY)) {
                 return -RISCV_EXCP_VIRT_INSTRUCTION_FAULT;
             }
             break;
         case CSR_TIME:
-            if (!get_field(env->hcounteren, HCOUNTEREN_TM)) {
+            if (!get_field(env->hcounteren, HCOUNTEREN_TM) &&
+                get_field(env->mcounteren, HCOUNTEREN_TM)) {
                 return -RISCV_EXCP_VIRT_INSTRUCTION_FAULT;
             }
             break;
         case CSR_INSTRET:
-            if (!get_field(env->hcounteren, HCOUNTEREN_IR)) {
+            if (!get_field(env->hcounteren, HCOUNTEREN_IR) &&
+                get_field(env->mcounteren, HCOUNTEREN_IR)) {
                 return -RISCV_EXCP_VIRT_INSTRUCTION_FAULT;
             }
             break;
         case CSR_HPMCOUNTER3...CSR_HPMCOUNTER31:
-            if (!get_field(env->hcounteren, 1 << (csrno - CSR_HPMCOUNTER3))) {
+            if (!get_field(env->hcounteren, 1 << (csrno - CSR_HPMCOUNTER3)) &&
+                get_field(env->mcounteren, 1 << (csrno - CSR_HPMCOUNTER3))) {
                 return -RISCV_EXCP_VIRT_INSTRUCTION_FAULT;
             }
             break;
 #if defined(TARGET_RISCV32)
         case CSR_CYCLEH:
-            if (!get_field(env->hcounteren, HCOUNTEREN_CY)) {
+            if (!get_field(env->hcounteren, HCOUNTEREN_CY) &&
+                get_field(env->mcounteren, HCOUNTEREN_CY)) {
                 return -RISCV_EXCP_VIRT_INSTRUCTION_FAULT;
             }
             break;
         case CSR_TIMEH:
-            if (!get_field(env->hcounteren, HCOUNTEREN_TM)) {
+            if (!get_field(env->hcounteren, HCOUNTEREN_TM) &&
+                get_field(env->mcounteren, HCOUNTEREN_TM)) {
                 return -RISCV_EXCP_VIRT_INSTRUCTION_FAULT;
             }
             break;
         case CSR_INSTRETH:
-            if (!get_field(env->hcounteren, HCOUNTEREN_IR)) {
+            if (!get_field(env->hcounteren, HCOUNTEREN_IR) &&
+                get_field(env->mcounteren, HCOUNTEREN_IR)) {
                 return -RISCV_EXCP_VIRT_INSTRUCTION_FAULT;
             }
             break;
         case CSR_HPMCOUNTER3H...CSR_HPMCOUNTER31H:
-            if (!get_field(env->hcounteren, 1 << (csrno - CSR_HPMCOUNTER3H))) {
+            if (!get_field(env->hcounteren, 1 << (csrno - CSR_HPMCOUNTER3H)) &&
+                get_field(env->mcounteren, 1 << (csrno - CSR_HPMCOUNTER3H))) {
                 return -RISCV_EXCP_VIRT_INSTRUCTION_FAULT;
             }
             break;
@@ -203,6 +223,10 @@ static int read_fcsr(CPURISCVState *env, int csrno, target_ulong *val)
 #endif
     *val = (riscv_cpu_get_fflags(env) << FSR_AEXC_SHIFT)
         | (env->frm << FSR_RD_SHIFT);
+    if (vs(env, csrno) >= 0) {
+        *val |= (env->vxrm << FSR_VXRM_SHIFT)
+                | (env->vxsat << FSR_VXSAT_SHIFT);
+    }
     return 0;
 }
 
@@ -215,7 +239,59 @@ static int write_fcsr(CPURISCVState *env, int csrno, target_ulong val)
     env->mstatus |= MSTATUS_FS;
 #endif
     env->frm = (val & FSR_RD) >> FSR_RD_SHIFT;
+    if (vs(env, csrno) >= 0) {
+        env->vxrm = (val & FSR_VXRM) >> FSR_VXRM_SHIFT;
+        env->vxsat = (val & FSR_VXSAT) >> FSR_VXSAT_SHIFT;
+    }
     riscv_cpu_set_fflags(env, (val & FSR_AEXC) >> FSR_AEXC_SHIFT);
+    return 0;
+}
+
+static int read_vtype(CPURISCVState *env, int csrno, target_ulong *val)
+{
+    *val = env->vtype;
+    return 0;
+}
+
+static int read_vl(CPURISCVState *env, int csrno, target_ulong *val)
+{
+    *val = env->vl;
+    return 0;
+}
+
+static int read_vxrm(CPURISCVState *env, int csrno, target_ulong *val)
+{
+    *val = env->vxrm;
+    return 0;
+}
+
+static int write_vxrm(CPURISCVState *env, int csrno, target_ulong val)
+{
+    env->vxrm = val;
+    return 0;
+}
+
+static int read_vxsat(CPURISCVState *env, int csrno, target_ulong *val)
+{
+    *val = env->vxsat;
+    return 0;
+}
+
+static int write_vxsat(CPURISCVState *env, int csrno, target_ulong val)
+{
+    env->vxsat = val;
+    return 0;
+}
+
+static int read_vstart(CPURISCVState *env, int csrno, target_ulong *val)
+{
+    *val = env->vstart;
+    return 0;
+}
+
+static int write_vstart(CPURISCVState *env, int csrno, target_ulong val)
+{
+    env->vstart = val;
     return 0;
 }
 
@@ -223,8 +299,8 @@ static int write_fcsr(CPURISCVState *env, int csrno, target_ulong val)
 static int read_instret(CPURISCVState *env, int csrno, target_ulong *val)
 {
 #if !defined(CONFIG_USER_ONLY)
-    if (use_icount) {
-        *val = cpu_get_icount();
+    if (icount_enabled()) {
+        *val = icount_get();
     } else {
         *val = cpu_get_host_ticks();
     }
@@ -238,8 +314,8 @@ static int read_instret(CPURISCVState *env, int csrno, target_ulong *val)
 static int read_instreth(CPURISCVState *env, int csrno, target_ulong *val)
 {
 #if !defined(CONFIG_USER_ONLY)
-    if (use_icount) {
-        *val = cpu_get_icount() >> 32;
+    if (icount_enabled()) {
+        *val = icount_get() >> 32;
     } else {
         *val = cpu_get_host_ticks() >> 32;
     }
@@ -275,7 +351,7 @@ static int read_time(CPURISCVState *env, int csrno, target_ulong *val)
         return -RISCV_EXCP_ILLEGAL_INST;
     }
 
-    *val = env->rdtime_fn() + delta;
+    *val = env->rdtime_fn(env->rdtime_fn_arg) + delta;
     return 0;
 }
 
@@ -288,7 +364,7 @@ static int read_timeh(CPURISCVState *env, int csrno, target_ulong *val)
         return -RISCV_EXCP_ILLEGAL_INST;
     }
 
-    *val = (env->rdtime_fn() + delta) >> 32;
+    *val = (env->rdtime_fn(env->rdtime_fn_arg) + delta) >> 32;
     return 0;
 }
 #endif
@@ -370,8 +446,8 @@ static int validate_vm(CPURISCVState *env, target_ulong vm)
 
 static int write_mstatus(CPURISCVState *env, int csrno, target_ulong val)
 {
-    target_ulong mstatus = env->mstatus;
-    target_ulong mask = 0;
+    uint64_t mstatus = env->mstatus;
+    uint64_t mask = 0;
     int dirty;
 
     /* flush tlb on mstatus fields that affect VM */
@@ -404,19 +480,20 @@ static int write_mstatus(CPURISCVState *env, int csrno, target_ulong val)
 #ifdef TARGET_RISCV32
 static int read_mstatush(CPURISCVState *env, int csrno, target_ulong *val)
 {
-    *val = env->mstatush;
+    *val = env->mstatus >> 32;
     return 0;
 }
 
 static int write_mstatush(CPURISCVState *env, int csrno, target_ulong val)
 {
-    if ((val ^ env->mstatush) & (MSTATUS_MPV)) {
+    uint64_t valh = (uint64_t)val << 32;
+    uint64_t mask = MSTATUS_MPV | MSTATUS_GVA;
+
+    if ((valh ^ env->mstatus) & (MSTATUS_MPV)) {
         tlb_flush(env_cpu(env));
     }
 
-    val &= MSTATUS_MPV | MSTATUS_GVA;
-
-    env->mstatush = val;
+    env->mstatus = (env->mstatus & ~mask) | (valh & mask);
 
     return 0;
 }
@@ -805,7 +882,7 @@ static int write_satp(CPURISCVState *env, int csrno, target_ulong val)
         if (env->priv == PRV_S && get_field(env->mstatus, MSTATUS_TVM)) {
             return -RISCV_EXCP_ILLEGAL_INST;
         } else {
-            if((val ^ env->satp) & SATP_ASID) {
+            if ((val ^ env->satp) & SATP_ASID) {
                 tlb_flush(env_cpu(env));
             }
             env->satp = val;
@@ -1029,7 +1106,8 @@ static int read_vsstatus(CPURISCVState *env, int csrno, target_ulong *val)
 
 static int write_vsstatus(CPURISCVState *env, int csrno, target_ulong val)
 {
-    env->vsstatus = val;
+    uint64_t mask = (target_ulong)-1;
+    env->vsstatus = (env->vsstatus & ~mask) | (uint64_t)val;
     return 0;
 }
 
@@ -1287,7 +1365,12 @@ static riscv_csr_operations csr_ops[CSR_TABLE_SIZE] = {
     [CSR_FFLAGS] =              { fs,   read_fflags,      write_fflags      },
     [CSR_FRM] =                 { fs,   read_frm,         write_frm         },
     [CSR_FCSR] =                { fs,   read_fcsr,        write_fcsr        },
-
+    /* Vector CSRs */
+    [CSR_VSTART] =              { vs,   read_vstart,      write_vstart      },
+    [CSR_VXSAT] =               { vs,   read_vxsat,       write_vxsat       },
+    [CSR_VXRM] =                { vs,   read_vxrm,        write_vxrm        },
+    [CSR_VL] =                  { vs,   read_vl                             },
+    [CSR_VTYPE] =               { vs,   read_vtype                          },
     /* User Timers and Counters */
     [CSR_CYCLE] =               { ctr,  read_instret                        },
     [CSR_INSTRET] =             { ctr,  read_instret                        },
@@ -1387,7 +1470,7 @@ static riscv_csr_operations csr_ops[CSR_TABLE_SIZE] = {
     [CSR_MTINST] =              { hmode,   read_mtinst,      write_mtinst     },
 
     /* Physical Memory Protection */
-    [CSR_PMPCFG0  ... CSR_PMPADDR9] =  { pmp,   read_pmpcfg,  write_pmpcfg   },
+    [CSR_PMPCFG0  ... CSR_PMPCFG3]   = { pmp,   read_pmpcfg,  write_pmpcfg   },
     [CSR_PMPADDR0 ... CSR_PMPADDR15] = { pmp,   read_pmpaddr, write_pmpaddr  },
 
     /* Performance Counters */
