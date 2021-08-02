@@ -108,6 +108,7 @@ __thread CPUState *current_cpu;
    2 = Adaptive rate instruction counting.  */
 int use_icount;
 
+//tetet
 uintptr_t qemu_host_page_size;
 intptr_t qemu_host_page_mask;
 
