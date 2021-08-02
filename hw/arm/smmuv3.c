@@ -1452,6 +1452,7 @@ static const VMStateDescription vmstate_smmuv3 = {
 static void smmuv3_instance_init(Object *obj)
 {
     /* Nothing much to do here as of now */
+    printf("==== %s, test\n", __func__);
 }
 
 static void smmuv3_class_init(ObjectClass *klass, void *data)
