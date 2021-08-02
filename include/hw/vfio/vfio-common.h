@@ -76,6 +76,14 @@ typedef struct VFIOAddressSpace {
 
 struct VFIOGroup;
 
+typedef struct VFIODMARange {
+    QLIST_ENTRY(VFIODMARange) next;
+    hwaddr iova;
+    size_t size;
+    void *vaddr; /* unused */
+    unsigned long *bitmap; /* dirty bitmap cache for this range */
+} VFIODMARange;
+
 typedef struct VFIOContainer {
     VFIOAddressSpace *space;
     int fd; /* /dev/vfio/vfio, empowered by the attached groups */
@@ -85,12 +93,14 @@ typedef struct VFIOContainer {
     int error;
     bool initialized;
     bool dirty_pages_supported;
+    bool dirty_log_manual_clear;
     uint64_t dirty_pgsizes;
     uint64_t max_dirty_bitmap_size;
     unsigned long pgsizes;
     QLIST_HEAD(, VFIOGuestIOMMU) giommu_list;
     QLIST_HEAD(, VFIOHostDMAWindow) hostwin_list;
     QLIST_HEAD(, VFIOGroup) group_list;
+    QLIST_HEAD(, VFIODMARange) dma_list;
     QLIST_ENTRY(VFIOContainer) next;
 } VFIOContainer;
 
@@ -123,12 +133,14 @@ typedef struct VFIODevice {
     bool needs_reset;
     bool no_mmap;
     bool balloon_allowed;
+    bool enable_migration;
     VFIODeviceOps *ops;
     unsigned int num_irqs;
     unsigned int num_regions;
     unsigned int flags;
     VFIOMigration *migration;
     Error *migration_blocker;
+    OnOffAuto pre_copy_dirty_page_tracking;
 } VFIODevice;
 
 struct VFIODeviceOps {

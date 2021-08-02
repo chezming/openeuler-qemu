@@ -310,7 +310,7 @@ bool vfio_mig_active(void)
     return true;
 }
 
-static bool vfio_devices_all_stopped_and_saving(VFIOContainer *container)
+static bool vfio_devices_all_dirty_tracking(VFIOContainer *container)
 {
     VFIOGroup *group;
     VFIODevice *vbasedev;
@@ -328,10 +328,8 @@ static bool vfio_devices_all_stopped_and_saving(VFIOContainer *container)
                 return false;
             }
 
-            if ((migration->device_state & VFIO_DEVICE_STATE_SAVING) &&
-                !(migration->device_state & VFIO_DEVICE_STATE_RUNNING)) {
-                continue;
-            } else {
+            if ((vbasedev->pre_copy_dirty_page_tracking == ON_OFF_AUTO_OFF)
+                && (migration->device_state & VFIO_DEVICE_STATE_RUNNING)) {
                 return false;
             }
         }
@@ -374,7 +372,7 @@ static int vfio_dma_unmap_bitmap(VFIOContainer *container,
 {
     struct vfio_iommu_type1_dma_unmap *unmap;
     struct vfio_bitmap *bitmap;
-    uint64_t pages = TARGET_PAGE_ALIGN(size) >> TARGET_PAGE_BITS;
+    uint64_t pages = REAL_HOST_PAGE_ALIGN(size) / qemu_real_host_page_size;
     int ret;
 
     unmap = g_malloc0(sizeof(*unmap) + sizeof(*bitmap));
@@ -386,12 +384,12 @@ static int vfio_dma_unmap_bitmap(VFIOContainer *container,
     bitmap = (struct vfio_bitmap *)&unmap->data;
 
     /*
-     * cpu_physical_memory_set_dirty_lebitmap() expects pages in bitmap of
-     * TARGET_PAGE_SIZE to mark those dirty. Hence set bitmap_pgsize to
-     * TARGET_PAGE_SIZE.
+     * cpu_physical_memory_set_dirty_lebitmap() supports pages in bitmap of
+     * qemu_real_host_page_size to mark those dirty. Hence set bitmap_pgsize
+     * to qemu_real_host_page_size.
      */
 
-    bitmap->pgsize = TARGET_PAGE_SIZE;
+    bitmap->pgsize = qemu_real_host_page_size;
     bitmap->size = ROUND_UP(pages, sizeof(__u64) * BITS_PER_BYTE) /
                    BITS_PER_BYTE;
 
@@ -422,6 +420,29 @@ unmap_exit:
     return ret;
 }
 
+static VFIODMARange *vfio_lookup_match_range(VFIOContainer *container,
+        hwaddr start_addr, hwaddr size)
+{
+    VFIODMARange *qrange;
+
+    QLIST_FOREACH(qrange, &container->dma_list, next) {
+        if (qrange->iova == start_addr && qrange->size == size) {
+            return qrange;
+        }
+    }
+    return NULL;
+}
+
+static void vfio_dma_range_init_dirty_bitmap(VFIODMARange *qrange)
+{
+    uint64_t pages, size;
+
+    pages = REAL_HOST_PAGE_ALIGN(qrange->size) / qemu_real_host_page_size;
+    size = ROUND_UP(pages, sizeof(__u64) * BITS_PER_BYTE) / BITS_PER_BYTE;
+
+    qrange->bitmap = g_malloc0(size);
+}
+
 /*
  * DMA - Mapping and unmapping for the "type1" IOMMU interface used on x86
  */
@@ -435,11 +456,28 @@ static int vfio_dma_unmap(VFIOContainer *container,
         .iova = iova,
         .size = size,
     };
+    VFIODMARange *qrange;
 
     if (iotlb && container->dirty_pages_supported &&
         vfio_devices_all_running_and_saving(container)) {
         return vfio_dma_unmap_bitmap(container, iova, size, iotlb);
     }
+
+    /*
+     * unregister the DMA range
+     *
+     * It seems that the memory layer will give us the same section as the one
+     * used in region_add(). Otherwise it'll be complicated to manipulate the
+     * bitmap across region_{add,del}. Is there any guarantee?
+     *
+     * But there is really not such a restriction on the kernel interface
+     * (VFIO_IOMMU_DIRTY_PAGES_FLAG_{UN}MAP_DMA, etc).
+     */
+    qrange = vfio_lookup_match_range(container, iova, size);
+    assert(qrange);
+    g_free(qrange->bitmap);
+    QLIST_REMOVE(qrange, next);
+    g_free(qrange);
 
     while (ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, &unmap)) {
         /*
@@ -477,6 +515,14 @@ static int vfio_dma_map(VFIOContainer *container, hwaddr iova,
         .iova = iova,
         .size = size,
     };
+    VFIODMARange *qrange;
+
+    qrange = g_malloc0(sizeof(*qrange));
+    qrange->iova = iova;
+    qrange->size = size;
+    QLIST_INSERT_HEAD(&container->dma_list, qrange, next);
+    /* XXX allocate the dirty bitmap on demand */
+    vfio_dma_range_init_dirty_bitmap(qrange);
 
     if (!readonly) {
         map.flags |= VFIO_DMA_MAP_FLAG_WRITE;
@@ -669,16 +715,17 @@ static void vfio_listener_region_add(MemoryListener *listener,
         return;
     }
 
-    if (unlikely((section->offset_within_address_space & ~TARGET_PAGE_MASK) !=
-                 (section->offset_within_region & ~TARGET_PAGE_MASK))) {
+    if (unlikely((section->offset_within_address_space &
+                  ~qemu_real_host_page_mask) !=
+                 (section->offset_within_region & ~qemu_real_host_page_mask))) {
         error_report("%s received unaligned region", __func__);
         return;
     }
 
-    iova = TARGET_PAGE_ALIGN(section->offset_within_address_space);
+    iova = REAL_HOST_PAGE_ALIGN(section->offset_within_address_space);
     llend = int128_make64(section->offset_within_address_space);
     llend = int128_add(llend, section->size);
-    llend = int128_and(llend, int128_exts64(TARGET_PAGE_MASK));
+    llend = int128_and(llend, int128_exts64(qemu_real_host_page_mask));
 
     if (int128_ge(int128_make64(iova), llend)) {
         return;
@@ -863,8 +910,9 @@ static void vfio_listener_region_del(MemoryListener *listener,
         return;
     }
 
-    if (unlikely((section->offset_within_address_space & ~TARGET_PAGE_MASK) !=
-                 (section->offset_within_region & ~TARGET_PAGE_MASK))) {
+    if (unlikely((section->offset_within_address_space &
+                  ~qemu_real_host_page_mask) !=
+                 (section->offset_within_region & ~qemu_real_host_page_mask))) {
         error_report("%s received unaligned region", __func__);
         return;
     }
@@ -892,10 +940,10 @@ static void vfio_listener_region_del(MemoryListener *listener,
          */
     }
 
-    iova = TARGET_PAGE_ALIGN(section->offset_within_address_space);
+    iova = REAL_HOST_PAGE_ALIGN(section->offset_within_address_space);
     llend = int128_make64(section->offset_within_address_space);
     llend = int128_add(llend, section->size);
-    llend = int128_and(llend, int128_exts64(TARGET_PAGE_MASK));
+    llend = int128_and(llend, int128_exts64(qemu_real_host_page_mask));
 
     if (int128_ge(int128_make64(iova), llend)) {
         return;
@@ -947,37 +995,75 @@ static void vfio_listener_region_del(MemoryListener *listener,
     }
 }
 
+static void vfio_set_dirty_page_tracking(VFIOContainer *container, bool start)
+{
+    int ret;
+    struct vfio_iommu_type1_dirty_bitmap dirty = {
+        .argsz = sizeof(dirty),
+    };
+
+    if (start) {
+        dirty.flags = VFIO_IOMMU_DIRTY_PAGES_FLAG_START;
+    } else {
+        dirty.flags = VFIO_IOMMU_DIRTY_PAGES_FLAG_STOP;
+    }
+
+    ret = ioctl(container->fd, VFIO_IOMMU_DIRTY_PAGES, &dirty);
+    if (ret) {
+        error_report("Failed to set dirty tracking flag 0x%x errno: %d",
+                     dirty.flags, errno);
+    }
+}
+
+static void vfio_listener_log_global_start(MemoryListener *listener)
+{
+    VFIOContainer *container = container_of(listener, VFIOContainer, listener);
+
+    vfio_set_dirty_page_tracking(container, true);
+}
+
+static void vfio_listener_log_global_stop(MemoryListener *listener)
+{
+    VFIOContainer *container = container_of(listener, VFIOContainer, listener);
+
+    vfio_set_dirty_page_tracking(container, false);
+}
+
 static int vfio_get_dirty_bitmap(VFIOContainer *container, uint64_t iova,
                                  uint64_t size, ram_addr_t ram_addr)
 {
     struct vfio_iommu_type1_dirty_bitmap *dbitmap;
     struct vfio_iommu_type1_dirty_bitmap_get *range;
+    VFIODMARange *qrange;
     uint64_t pages;
     int ret;
+
+    qrange = vfio_lookup_match_range(container, iova, size);
+    /* the same as vfio_dma_unmap() */
+    assert(qrange);
 
     dbitmap = g_malloc0(sizeof(*dbitmap) + sizeof(*range));
 
     dbitmap->argsz = sizeof(*dbitmap) + sizeof(*range);
-    dbitmap->flags = VFIO_IOMMU_DIRTY_PAGES_FLAG_GET_BITMAP;
+    dbitmap->flags = container->dirty_log_manual_clear ?
+                     VFIO_IOMMU_DIRTY_PAGES_FLAG_GET_BITMAP_NOCLEAR :
+                     VFIO_IOMMU_DIRTY_PAGES_FLAG_GET_BITMAP;
     range = (struct vfio_iommu_type1_dirty_bitmap_get *)&dbitmap->data;
     range->iova = iova;
     range->size = size;
 
     /*
-     * cpu_physical_memory_set_dirty_lebitmap() expects pages in bitmap of
-     * TARGET_PAGE_SIZE to mark those dirty. Hence set bitmap's pgsize to
-     * TARGET_PAGE_SIZE.
+     * cpu_physical_memory_set_dirty_lebitmap() supports pages in bitmap of
+     * qemu_real_host_page_size to mark those dirty. Hence set bitmap's pgsize
+     * to qemu_real_host_page_size.
      */
-    range->bitmap.pgsize = TARGET_PAGE_SIZE;
+    range->bitmap.pgsize = qemu_real_host_page_size;
 
-    pages = TARGET_PAGE_ALIGN(range->size) >> TARGET_PAGE_BITS;
+    pages = REAL_HOST_PAGE_ALIGN(range->size) / qemu_real_host_page_size;
     range->bitmap.size = ROUND_UP(pages, sizeof(__u64) * BITS_PER_BYTE) /
                                          BITS_PER_BYTE;
-    range->bitmap.data = g_try_malloc0(range->bitmap.size);
-    if (!range->bitmap.data) {
-        ret = -ENOMEM;
-        goto err_out;
-    }
+
+    range->bitmap.data = (__u64 *)qrange->bitmap;
 
     ret = ioctl(container->fd, VFIO_IOMMU_DIRTY_PAGES, dbitmap);
     if (ret) {
@@ -993,7 +1079,6 @@ static int vfio_get_dirty_bitmap(VFIOContainer *container, uint64_t iova,
     trace_vfio_get_dirty_bitmap(container->fd, range->iova, range->size,
                                 range->bitmap.size, ram_addr);
 err_out:
-    g_free(range->bitmap.data);
     g_free(dbitmap);
 
     return ret;
@@ -1074,11 +1159,11 @@ static int vfio_sync_dirty_bitmap(VFIOContainer *container,
                section->offset_within_region;
 
     return vfio_get_dirty_bitmap(container,
-                       TARGET_PAGE_ALIGN(section->offset_within_address_space),
-                       int128_get64(section->size), ram_addr);
+                   REAL_HOST_PAGE_ALIGN(section->offset_within_address_space),
+                   int128_get64(section->size), ram_addr);
 }
 
-static void vfio_listerner_log_sync(MemoryListener *listener,
+static void vfio_listener_log_sync(MemoryListener *listener,
         MemoryRegionSection *section)
 {
     VFIOContainer *container = container_of(listener, VFIOContainer, listener);
@@ -1088,15 +1173,153 @@ static void vfio_listerner_log_sync(MemoryListener *listener,
         return;
     }
 
-    if (vfio_devices_all_stopped_and_saving(container)) {
+    if (vfio_devices_all_dirty_tracking(container)) {
         vfio_sync_dirty_bitmap(container, section);
+    }
+}
+
+/*
+ * I'm not sure if there's any alignment requirement for the CLEAR_BITMAP
+ * ioctl. But copy from kvm side and align {start, size} with 64 pages.
+ *
+ * I think the code can be simplified a lot if no alignment requirement.
+ */
+#define VFIO_CLEAR_LOG_SHIFT  6
+#define VFIO_CLEAR_LOG_ALIGN  (qemu_real_host_page_size << VFIO_CLEAR_LOG_SHIFT)
+#define VFIO_CLEAR_LOG_MASK   (-VFIO_CLEAR_LOG_ALIGN)
+
+static int vfio_log_clear_one_range(VFIOContainer *container,
+        VFIODMARange *qrange, uint64_t start, uint64_t size)
+{
+    struct vfio_iommu_type1_dirty_bitmap *dbitmap;
+    struct vfio_iommu_type1_dirty_bitmap_get *range;
+
+    dbitmap = g_malloc0(sizeof(*dbitmap) + sizeof(*range));
+
+    dbitmap->argsz = sizeof(*dbitmap) + sizeof(*range);
+    dbitmap->flags = VFIO_IOMMU_DIRTY_PAGES_FLAG_CLEAR_BITMAP;
+    range = (struct vfio_iommu_type1_dirty_bitmap_get *)&dbitmap->data;
+
+    /*
+     * Now let's deal with the actual bitmap, which is almost the same
+     * as the kvm side.
+     */
+    uint64_t end, bmap_start, start_delta, bmap_npages;
+    unsigned long *bmap_clear = NULL, psize = qemu_real_host_page_size;
+    int ret;
+
+    bmap_start = start & VFIO_CLEAR_LOG_MASK;
+    start_delta = start - bmap_start;
+    bmap_start /= psize;
+
+    bmap_npages = DIV_ROUND_UP(size + start_delta, VFIO_CLEAR_LOG_ALIGN)
+        << VFIO_CLEAR_LOG_SHIFT;
+    end = qrange->size / psize;
+    if (bmap_npages > end - bmap_start) {
+        bmap_npages = end - bmap_start;
+    }
+    start_delta /= psize;
+
+    if (start_delta) {
+        bmap_clear = bitmap_new(bmap_npages);
+        bitmap_copy_with_src_offset(bmap_clear, qrange->bitmap,
+                                    bmap_start, start_delta + size / psize);
+        bitmap_clear(bmap_clear, 0, start_delta);
+        range->bitmap.data = (__u64 *)bmap_clear;
+    } else {
+        range->bitmap.data = (__u64 *)(qrange->bitmap + BIT_WORD(bmap_start));
+    }
+
+    range->iova = qrange->iova + bmap_start * psize;
+    range->size = bmap_npages * psize;
+    range->bitmap.size = ROUND_UP(bmap_npages, sizeof(__u64) * BITS_PER_BYTE) /
+                                               BITS_PER_BYTE;
+    range->bitmap.pgsize = qemu_real_host_page_size;
+
+    ret = ioctl(container->fd, VFIO_IOMMU_DIRTY_PAGES, dbitmap);
+    if (ret) {
+        error_report("Failed to clear dirty log for iova: 0x%"PRIx64
+                " size: 0x%"PRIx64" err: %d", (uint64_t)range->iova,
+                (uint64_t)range->size, errno);
+        goto err_out;
+    }
+
+    bitmap_clear(qrange->bitmap, bmap_start + start_delta, size / psize);
+err_out:
+    g_free(bmap_clear);
+    g_free(dbitmap);
+    return 0;
+}
+
+static int vfio_physical_log_clear(VFIOContainer *container,
+                                   MemoryRegionSection *section)
+{
+    uint64_t start, size, offset, count;
+    VFIODMARange *qrange;
+    int ret = 0;
+
+    if (!container->dirty_log_manual_clear) {
+        /* No need to do explicit clear */
+        return ret;
+    }
+
+    start = section->offset_within_address_space;
+    size = int128_get64(section->size);
+
+    if (!size) {
+        return ret;
+    }
+
+    QLIST_FOREACH(qrange, &container->dma_list, next) {
+        /*
+         * Discard ranges that do not overlap the section (e.g., the
+         * Memory BAR regions of the device)
+         */
+        if (qrange->iova > start + size - 1 ||
+            start > qrange->iova + qrange->size - 1) {
+            continue;
+        }
+
+        if (start >= qrange->iova) {
+            /* The range starts before section or is aligned to it. */
+            offset = start - qrange->iova;
+            count = MIN(qrange->size - offset, size);
+        } else {
+            /* The range starts after section. */
+            offset = 0;
+            count = MIN(qrange->size, size - (qrange->iova - start));
+        }
+        ret = vfio_log_clear_one_range(container, qrange, offset, count);
+        if (ret < 0) {
+            break;
+        }
+    }
+
+    return ret;
+}
+
+static void vfio_listener_log_clear(MemoryListener *listener,
+                                    MemoryRegionSection *section)
+{
+    VFIOContainer *container = container_of(listener, VFIOContainer, listener);
+
+    if (vfio_listener_skipped_section(section) ||
+        !container->dirty_pages_supported) {
+        return;
+    }
+
+    if (vfio_devices_all_dirty_tracking(container)) {
+        vfio_physical_log_clear(container, section);
     }
 }
 
 static const MemoryListener vfio_memory_listener = {
     .region_add = vfio_listener_region_add,
     .region_del = vfio_listener_region_del,
-    .log_sync = vfio_listerner_log_sync,
+    .log_global_start = vfio_listener_log_global_start,
+    .log_global_stop = vfio_listener_log_global_stop,
+    .log_sync = vfio_listener_log_sync,
+    .log_clear = vfio_listener_log_clear,
 };
 
 static void vfio_listener_release(VFIOContainer *container)
@@ -1478,7 +1701,7 @@ static int vfio_get_iommu_type(VFIOContainer *container,
 static int vfio_init_container(VFIOContainer *container, int group_fd,
                                Error **errp)
 {
-    int iommu_type, ret;
+    int iommu_type, dirty_log_manual_clear, ret;
 
     iommu_type = vfio_get_iommu_type(container, errp);
     if (iommu_type < 0) {
@@ -1507,6 +1730,13 @@ static int vfio_init_container(VFIOContainer *container, int group_fd,
     }
 
     container->iommu_type = iommu_type;
+
+    dirty_log_manual_clear = ioctl(container->fd, VFIO_CHECK_EXTENSION,
+                                   VFIO_DIRTY_LOG_MANUAL_CLEAR);
+    if (dirty_log_manual_clear) {
+        container->dirty_log_manual_clear = dirty_log_manual_clear;
+    }
+
     return 0;
 }
 
@@ -1569,10 +1799,10 @@ static void vfio_get_iommu_info_migration(VFIOContainer *container,
                             header);
 
     /*
-     * cpu_physical_memory_set_dirty_lebitmap() expects pages in bitmap of
-     * TARGET_PAGE_SIZE to mark those dirty.
+     * cpu_physical_memory_set_dirty_lebitmap() supports pages in bitmap of
+     * qemu_real_host_page_size to mark those dirty.
      */
-    if (cap_mig->pgsize_bitmap & TARGET_PAGE_SIZE) {
+    if (cap_mig->pgsize_bitmap & qemu_real_host_page_size) {
         container->dirty_pages_supported = true;
         container->max_dirty_bitmap_size = cap_mig->max_dirty_bitmap_size;
         container->dirty_pgsizes = cap_mig->pgsize_bitmap;
@@ -1645,6 +1875,7 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     container->dirty_pages_supported = false;
     QLIST_INIT(&container->giommu_list);
     QLIST_INIT(&container->hostwin_list);
+    QLIST_INIT(&container->dma_list);
 
     ret = vfio_init_container(container, group->fd, errp);
     if (ret) {

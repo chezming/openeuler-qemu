@@ -395,39 +395,9 @@ static int vfio_load_device_config_state(QEMUFile *f, void *opaque)
     return qemu_file_get_error(f);
 }
 
-static int vfio_set_dirty_page_tracking(VFIODevice *vbasedev, bool start)
-{
-    int ret;
-    VFIOMigration *migration = vbasedev->migration;
-    VFIOContainer *container = vbasedev->group->container;
-    struct vfio_iommu_type1_dirty_bitmap dirty = {
-        .argsz = sizeof(dirty),
-    };
-
-    if (start) {
-        if (migration->device_state & VFIO_DEVICE_STATE_SAVING) {
-            dirty.flags = VFIO_IOMMU_DIRTY_PAGES_FLAG_START;
-        } else {
-            return -EINVAL;
-        }
-    } else {
-            dirty.flags = VFIO_IOMMU_DIRTY_PAGES_FLAG_STOP;
-    }
-
-    ret = ioctl(container->fd, VFIO_IOMMU_DIRTY_PAGES, &dirty);
-    if (ret) {
-        error_report("Failed to set dirty tracking flag 0x%x errno: %d",
-                     dirty.flags, errno);
-        return -errno;
-    }
-    return ret;
-}
-
 static void vfio_migration_cleanup(VFIODevice *vbasedev)
 {
     VFIOMigration *migration = vbasedev->migration;
-
-    vfio_set_dirty_page_tracking(vbasedev, false);
 
     if (migration->region.mmaps) {
         vfio_region_unmap(&migration->region);
@@ -466,11 +436,6 @@ static int vfio_save_setup(QEMUFile *f, void *opaque)
                                    VFIO_DEVICE_STATE_SAVING);
     if (ret) {
         error_report("%s: Failed to set state SAVING", vbasedev->name);
-        return ret;
-    }
-
-    ret = vfio_set_dirty_page_tracking(vbasedev, true);
-    if (ret) {
         return ret;
     }
 
@@ -888,7 +853,7 @@ int vfio_migration_probe(VFIODevice *vbasedev, Error **errp)
     Error *local_err = NULL;
     int ret = -ENOTSUP;
 
-    if (!container->dirty_pages_supported) {
+    if (!vbasedev->enable_migration || !container->dirty_pages_supported) {
         goto add_blocker;
     }
 
@@ -903,8 +868,8 @@ int vfio_migration_probe(VFIODevice *vbasedev, Error **errp)
         goto add_blocker;
     }
 
-    g_free(info);
     trace_vfio_migration_probe(vbasedev->name, info->index);
+    g_free(info);
     return 0;
 
 add_blocker:
@@ -928,6 +893,7 @@ void vfio_migration_finalize(VFIODevice *vbasedev)
 
         remove_migration_state_change_notifier(&migration->migration_state);
         qemu_del_vm_change_state_handler(migration->vm_state);
+        unregister_savevm(vbasedev->dev, "vfio", vbasedev);
         vfio_migration_exit(vbasedev);
     }
 
