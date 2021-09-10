@@ -89,6 +89,7 @@ static int cap_ppc_count_cache_flush_assist;
 static int cap_ppc_nested_kvm_hv;
 static int cap_large_decr;
 static int cap_fwnmi;
+static int cap_rpt_invalidate;
 
 static uint32_t debug_inst_opcode;
 
@@ -152,6 +153,7 @@ int kvm_arch_init(MachineState *ms, KVMState *s)
         exit(1);
     }
 
+    cap_rpt_invalidate = kvm_vm_check_extension(s, KVM_CAP_PPC_RPT_INVALIDATE);
     kvm_ppc_register_host_cpu_type();
 
     return 0;
@@ -1815,24 +1817,37 @@ static int read_cpuinfo(const char *field, char *value, int len)
     return ret;
 }
 
-uint32_t kvmppc_get_tbfreq(void)
+static uint32_t kvmppc_get_tbfreq_procfs(void)
 {
     char line[512];
     char *ns;
-    uint32_t retval = NANOSECONDS_PER_SECOND;
+    uint32_t tbfreq_fallback = NANOSECONDS_PER_SECOND;
+    uint32_t tbfreq_procfs;
 
     if (read_cpuinfo("timebase", line, sizeof(line))) {
-        return retval;
+        return tbfreq_fallback;
     }
 
     ns = strchr(line, ':');
     if (!ns) {
-        return retval;
+        return tbfreq_fallback;
     }
 
-    ns++;
+    tbfreq_procfs = atoi(++ns);
 
-    return atoi(ns);
+    /* 0 is certainly not acceptable by the guest, return fallback value */
+    return tbfreq_procfs ? tbfreq_procfs : tbfreq_fallback;
+}
+
+uint32_t kvmppc_get_tbfreq(void)
+{
+    static uint32_t cached_tbfreq;
+
+    if (!cached_tbfreq) {
+        cached_tbfreq = kvmppc_get_tbfreq_procfs();
+    }
+
+    return cached_tbfreq;
 }
 
 bool kvmppc_get_host_serial(char **value)
@@ -2025,6 +2040,11 @@ void kvmppc_enable_clear_ref_mod_hcalls(void)
 void kvmppc_enable_h_page_init(void)
 {
     kvmppc_enable_hcall(kvm_state, H_PAGE_INIT);
+}
+
+void kvmppc_enable_h_rpt_invalidate(void)
+{
+    kvmppc_enable_hcall(kvm_state, H_RPT_INVALIDATE);
 }
 
 void kvmppc_set_papr(PowerPCCPU *cpu)
@@ -2536,6 +2556,11 @@ int kvmppc_enable_cap_large_decr(PowerPCCPU *cpu, int enable)
     }
 
     return 0;
+}
+
+int kvmppc_has_cap_rpt_invalidate(void)
+{
+    return cap_rpt_invalidate;
 }
 
 PowerPCCPUClass *kvm_ppc_get_host_cpu_class(void)

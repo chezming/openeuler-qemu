@@ -94,8 +94,17 @@ class QAPISchemaTestVisitor(QAPISchemaVisitor):
 
     @staticmethod
     def _print_if(ifcond, indent=4):
-        if ifcond:
-            print('%sif %s' % (' ' * indent, ifcond))
+        # TODO Drop this hack after replacing OrderedDict by plain
+        # dict (requires Python 3.7)
+        def _massage(subcond):
+            if isinstance(subcond, str):
+                return subcond
+            if isinstance(subcond, list):
+                return [_massage(val) for val in subcond]
+            return {key: _massage(val) for key, val in subcond.items()}
+
+        if ifcond.is_present():
+            print('%sif %s' % (' ' * indent, _massage(ifcond.ifcond)))
 
     @classmethod
     def _print_features(cls, features, indent=4):
@@ -128,9 +137,6 @@ def test_and_diff(test_name, dir_name, update):
     try:
         test_frontend(os.path.join(dir_name, test_name + '.json'))
     except QAPIError as err:
-        if err.info.fname is None:
-            print("%s" % err, file=sys.stderr)
-            return 2
         errstr = str(err) + '\n'
         if dir_name:
             errstr = errstr.replace(dir_name + '/', '')

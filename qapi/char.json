@@ -342,7 +342,7 @@
 { 'struct': 'ChardevSpiceChannel',
   'data': { 'type': 'str' },
   'base': 'ChardevCommon',
-  'if': 'defined(CONFIG_SPICE)' }
+  'if': 'CONFIG_SPICE' }
 
 ##
 # @ChardevSpicePort:
@@ -356,7 +356,7 @@
 { 'struct': 'ChardevSpicePort',
   'data': { 'fqdn': 'str' },
   'base': 'ChardevCommon',
-  'if': 'defined(CONFIG_SPICE)' }
+  'if': 'CONFIG_SPICE' }
 
 ##
 # @ChardevVC:
@@ -391,11 +391,28 @@
   'base': 'ChardevCommon' }
 
 ##
+# @ChardevQemuVDAgent:
+#
+# Configuration info for qemu vdagent implementation.
+#
+# @mouse: enable/disable mouse, default is enabled.
+# @clipboard: enable/disable clipboard, default is disabled.
+#
+# Since: 6.1
+#
+##
+{ 'struct': 'ChardevQemuVDAgent',
+  'data': { '*mouse': 'bool',
+            '*clipboard': 'bool' },
+  'base': 'ChardevCommon',
+  'if': 'CONFIG_SPICE_PROTOCOL' }
+
+##
 # @ChardevBackend:
 #
 # Configuration info for the new chardev backend.
 #
-# Since: 1.4 (testdev since 2.2, wctablet since 2.9)
+# Since: 1.4 (testdev since 2.2, wctablet since 2.9, vdagent since 6.1)
 ##
 { 'union': 'ChardevBackend',
   'data': { 'file': 'ChardevFile',
@@ -414,9 +431,11 @@
             'stdio': 'ChardevStdio',
             'console': 'ChardevCommon',
             'spicevmc': { 'type': 'ChardevSpiceChannel',
-                          'if': 'defined(CONFIG_SPICE)' },
+                          'if': 'CONFIG_SPICE' },
             'spiceport': { 'type': 'ChardevSpicePort',
-                           'if': 'defined(CONFIG_SPICE)' },
+                           'if': 'CONFIG_SPICE' },
+            'qemu-vdagent': { 'type': 'ChardevQemuVDAgent',
+                              'if': 'CONFIG_SPICE_PROTOCOL' },
             'vc': 'ChardevVC',
             'ringbuf': 'ChardevRingbuf',
             # next one is just for compatibility

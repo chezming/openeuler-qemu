@@ -289,7 +289,6 @@ setup_return(CPUARMState *env, struct target_sigaction *ka,
     env->regs[14] = retcode;
     env->regs[15] = handler & (thumb ? ~1 : ~3);
     cpsr_write(env, cpsr, CPSR_IT | CPSR_T | CPSR_E, CPSRWriteByInstr);
-    arm_rebuild_hflags(env);
 
     return 0;
 }
@@ -547,7 +546,6 @@ restore_sigcontext(CPUARMState *env, struct target_sigcontext *sc)
     __get_user(env->regs[15], &sc->arm_pc);
     __get_user(cpsr, &sc->arm_cpsr);
     cpsr_write(env, cpsr, CPSR_USER | CPSR_EXEC, CPSRWriteByInstr);
-    arm_rebuild_hflags(env);
 
     err |= !valid_user_regs(env);
 
@@ -685,11 +683,7 @@ static int do_sigframe_return_v2(CPUARMState *env,
         }
     }
 
-    if (do_sigaltstack(context_addr
-                       + offsetof(struct target_ucontext_v2, tuc_stack),
-                       0, get_sp_from_cpustate(env)) == -EFAULT) {
-        return 1;
-    }
+    target_restore_altstack(&uc->tuc_stack, env);
 
 #if 0
     /* Send SIGTRAP if we're single-stepping */
@@ -773,8 +767,7 @@ static long do_rt_sigreturn_v1(CPUARMState *env)
         goto badframe;
     }
 
-    if (do_sigaltstack(frame_addr + offsetof(struct rt_sigframe_v1, uc.tuc_stack), 0, get_sp_from_cpustate(env)) == -EFAULT)
-        goto badframe;
+    target_restore_altstack(&frame->uc.tuc_stack, env);
 
 #if 0
     /* Send SIGTRAP if we're single-stepping */

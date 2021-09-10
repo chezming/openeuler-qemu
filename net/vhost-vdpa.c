@@ -29,7 +29,6 @@ typedef struct VhostVDPAState {
     NetClientState nc;
     struct vhost_vdpa vhost_vdpa;
     VHostNetState *vhost_net;
-    uint64_t acked_features;
     bool started;
 } VhostVDPAState;
 
@@ -54,6 +53,8 @@ const int vdpa_feature_bits[] = {
     VIRTIO_NET_F_MTU,
     VIRTIO_F_IOMMU_PLATFORM,
     VIRTIO_F_RING_PACKED,
+    VIRTIO_NET_F_RSS,
+    VIRTIO_NET_F_HASH_REPORT,
     VIRTIO_NET_F_GUEST_ANNOUNCE,
     VIRTIO_NET_F_STATUS,
     VHOST_INVALID_FEATURE_BIT
@@ -64,15 +65,6 @@ VHostNetState *vhost_vdpa_get_vhost_net(NetClientState *nc)
     VhostVDPAState *s = DO_UPCAST(VhostVDPAState, nc, nc);
     assert(nc->info->type == NET_CLIENT_DRIVER_VHOST_VDPA);
     return s->vhost_net;
-}
-
-uint64_t vhost_vdpa_get_acked_features(NetClientState *nc)
-{
-    VhostVDPAState *s = DO_UPCAST(VhostVDPAState, nc, nc);
-    assert(nc->info->type == NET_CLIENT_DRIVER_VHOST_VDPA);
-    s->acked_features = vhost_net_get_acked_features(s->vhost_net);
-
-    return s->acked_features;
 }
 
 static int vhost_vdpa_net_check_device_id(struct vhost_net *net)
@@ -89,16 +81,6 @@ static int vhost_vdpa_net_check_device_id(struct vhost_net *net)
     return ret;
 }
 
-static void vhost_vdpa_del(NetClientState *ncs)
-{
-    VhostVDPAState *s;
-    assert(ncs->info->type == NET_CLIENT_DRIVER_VHOST_VDPA);
-    s = DO_UPCAST(VhostVDPAState, nc, ncs);
-    if (s->vhost_net) {
-        vhost_net_cleanup(s->vhost_net);
-    }
-}
-
 static int vhost_vdpa_add(NetClientState *ncs, void *be)
 {
     VhostNetOptions options;
@@ -112,27 +94,23 @@ static int vhost_vdpa_add(NetClientState *ncs, void *be)
     options.net_backend = ncs;
     options.opaque      = be;
     options.busyloop_timeout = 0;
+    options.nvqs = 2;
 
     net = vhost_net_init(&options);
     if (!net) {
         error_report("failed to init vhost_net for queue");
-        goto err;
-    }
-    if (s->vhost_net) {
-        vhost_net_cleanup(s->vhost_net);
-        g_free(s->vhost_net);
+        goto err_init;
     }
     s->vhost_net = net;
     ret = vhost_vdpa_net_check_device_id(net);
     if (ret) {
-        goto err;
+        goto err_check;
     }
     return 0;
-err:
-    if (net) {
-        vhost_net_cleanup(net);
-    }
-    vhost_vdpa_del(ncs);
+err_check:
+    vhost_net_cleanup(net);
+    g_free(net);
+err_init:
     return -1;
 }
 
@@ -184,23 +162,9 @@ static int net_vhost_vdpa_init(NetClientState *peer, const char *device,
     VhostVDPAState *s;
     int vdpa_device_fd = -1;
     int ret = 0;
-    NetdevVhostVDPAOptions *stored;
-
     assert(name);
     nc = qemu_new_net_client(&net_vhost_vdpa_info, peer, device, name);
-
-    /* Store startup parameters */
-    nc->stored_config = g_new0(NetdevInfo, 1);
-    nc->stored_config->type = NET_BACKEND_VHOST_VDPA;
-    stored = &nc->stored_config->u.vhost_vdpa;
-
-    stored->has_vhostdev = true;
-    stored->vhostdev = g_strdup(vhostdev);
-
-    stored->has_queues = true;
-    stored->queues = 1; /* TODO: change when support multiqueue */
-
-    nc->queue_index = 0;
+    snprintf(nc->info_str, sizeof(nc->info_str), TYPE_VHOST_VDPA);
     s = DO_UPCAST(VhostVDPAState, nc, nc);
     vdpa_device_fd = qemu_open_old(vhostdev, O_RDWR);
     if (vdpa_device_fd == -1) {
@@ -208,7 +172,10 @@ static int net_vhost_vdpa_init(NetClientState *peer, const char *device,
     }
     s->vhost_vdpa.device_fd = vdpa_device_fd;
     ret = vhost_vdpa_add(nc, (void *)&s->vhost_vdpa);
-    assert(s->vhost_net);
+    if (ret) {
+        qemu_close(vdpa_device_fd);
+        qemu_del_net_client(nc);
+    }
     return ret;
 }
 

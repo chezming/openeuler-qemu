@@ -251,8 +251,8 @@
 #
 # @max_queue_size: the maximum number of packets to keep in the queue for
 #                  comparing with incoming packets from @secondary_in.  If the
-#                  queue is full and addtional packets are received, the
-#                  addtional packets are dropped. (default: 1024)
+#                  queue is full and additional packets are received, the
+#                  additional packets are dropped. (default: 1024)
 #
 # @vnet_hdr_support: if true, vnet header support is enabled (default: false)
 #
@@ -516,12 +516,17 @@
 #               algorithm detects it is spending too long polling without
 #               encountering events. 0 selects a default behaviour (default: 0)
 #
+# @aio-max-batch: maximum number of requests in a batch for the AIO engine,
+#                 0 means that the engine will use its default
+#                 (default:0, since 6.1)
+#
 # Since: 2.0
 ##
 { 'struct': 'IothreadProperties',
   'data': { '*poll-max-ns': 'int',
             '*poll-grow': 'int',
-            '*poll-shrink': 'int' } }
+            '*poll-shrink': 'int',
+            '*aio-max-batch': 'int' } }
 
 ##
 # @MemoryBackendProperties:
@@ -545,6 +550,9 @@
 # @share: if false, the memory is private to QEMU; if true, it is shared
 #         (default: false)
 #
+# @reserve: if true, reserve swap space (or huge pages) if applicable
+#           (default: true) (since 6.1)
+#
 # @size: size of the memory region in bytes
 #
 # @x-use-canonical-path-for-ramblock-id: if true, the canoncial path is used
@@ -556,6 +564,12 @@
 #                                        false generally, but true for machine
 #                                        types <= 4.0)
 #
+# Note: prealloc=true and reserve=false cannot be set at the same time. With
+#       reserve=true, the behavior depends on the operating system: for example,
+#       Linux will not reserve swap space for shared file mappings --
+#       "not applicable". In contrast, reserve=false will bail out if it cannot
+#       be configured accordingly.
+#
 # Since: 2.1
 ##
 { 'struct': 'MemoryBackendProperties',
@@ -566,6 +580,7 @@
             '*prealloc': 'bool',
             '*prealloc-threads': 'uint32',
             '*share': 'bool',
+            '*reserve': 'bool',
             'size': 'size',
             '*x-use-canonical-path-for-ramblock-id': 'bool' } }
 
@@ -603,7 +618,7 @@
   'data': { '*align': 'size',
             '*discard-data': 'bool',
             'mem-path': 'str',
-            '*pmem': { 'type': 'bool', 'if': 'defined(CONFIG_LIBPMEM)' },
+            '*pmem': { 'type': 'bool', 'if': 'CONFIG_LIBPMEM' },
             '*readonly': 'bool' } }
 
 ##
@@ -643,6 +658,21 @@
 ##
 { 'struct': 'PrManagerHelperProperties',
   'data': { 'path': 'str' } }
+
+##
+# @QtestProperties:
+#
+# Properties for qtest objects.
+#
+# @chardev: the chardev to be used to receive qtest commands on.
+#
+# @log: the path to a log file
+#
+# Since: 6.0
+##
+{ 'struct': 'QtestProperties',
+        'data': { 'chardev': 'str',
+                  '*log': 'str' } }
 
 ##
 # @RemoteObjectProperties:
@@ -733,8 +763,7 @@
             '*policy': 'uint32',
             '*handle': 'uint32',
             '*cbitpos': 'uint32',
-            'reduced-phys-bits': 'uint32' },
-  'if': 'defined(CONFIG_SEV)' }
+            'reduced-phys-bits': 'uint32' } }
 
 ##
 # @ObjectType:
@@ -753,7 +782,7 @@
     'cryptodev-backend',
     'cryptodev-backend-builtin',
     { 'name': 'cryptodev-vhost-user',
-      'if': 'defined(CONFIG_VIRTIO_CRYPTO) && defined(CONFIG_VHOST_CRYPTO)' },
+      'if': 'CONFIG_VHOST_CRYPTO' },
     'dbus-vmstate',
     'filter-buffer',
     'filter-dump',
@@ -766,16 +795,17 @@
     'iothread',
     'memory-backend-file',
     { 'name': 'memory-backend-memfd',
-      'if': 'defined(CONFIG_LINUX)' },
+      'if': 'CONFIG_LINUX' },
     'memory-backend-ram',
-    {'name': 'pef-guest', 'if': 'defined(CONFIG_PSERIES)' },
+    'pef-guest',
     'pr-manager-helper',
+    'qtest',
     'rng-builtin',
     'rng-egd',
     'rng-random',
     'secret',
     'secret_keyring',
-    {'name': 'sev-guest', 'if': 'defined(CONFIG_SEV)' },
+    'sev-guest',
     's390-pv-guest',
     'throttle-group',
     'tls-creds-anon',
@@ -810,7 +840,7 @@
       'cryptodev-backend':          'CryptodevBackendProperties',
       'cryptodev-backend-builtin':  'CryptodevBackendProperties',
       'cryptodev-vhost-user':       { 'type': 'CryptodevVhostUserProperties',
-                                      'if': 'defined(CONFIG_VIRTIO_CRYPTO) && defined(CONFIG_VHOST_CRYPTO)' },
+                                      'if': 'CONFIG_VHOST_CRYPTO' },
       'dbus-vmstate':               'DBusVMStateProperties',
       'filter-buffer':              'FilterBufferProperties',
       'filter-dump':                'FilterDumpProperties',
@@ -823,16 +853,16 @@
       'iothread':                   'IothreadProperties',
       'memory-backend-file':        'MemoryBackendFileProperties',
       'memory-backend-memfd':       { 'type': 'MemoryBackendMemfdProperties',
-                                      'if': 'defined(CONFIG_LINUX)' },
+                                      'if': 'CONFIG_LINUX' },
       'memory-backend-ram':         'MemoryBackendProperties',
       'pr-manager-helper':          'PrManagerHelperProperties',
+      'qtest':                      'QtestProperties',
       'rng-builtin':                'RngProperties',
       'rng-egd':                    'RngEgdProperties',
       'rng-random':                 'RngRandomProperties',
       'secret':                     'SecretProperties',
       'secret_keyring':             'SecretKeyringProperties',
-      'sev-guest':                  { 'type': 'SevGuestProperties',
-                                      'if': 'defined(CONFIG_SEV)' },
+      'sev-guest':                  'SevGuestProperties',
       'throttle-group':             'ThrottleGroupProperties',
       'tls-creds-anon':             'TlsCredsAnonProperties',
       'tls-creds-psk':              'TlsCredsPskProperties',
@@ -859,7 +889,8 @@
 # <- { "return": {} }
 #
 ##
-{ 'command': 'object-add', 'data': 'ObjectOptions', 'boxed': true }
+{ 'command': 'object-add', 'data': 'ObjectOptions', 'boxed': true,
+  'allow-preconfig': true }
 
 ##
 # @object-del:
@@ -879,4 +910,5 @@
 # <- { "return": {} }
 #
 ##
-{ 'command': 'object-del', 'data': {'id': 'str'} }
+{ 'command': 'object-del', 'data': {'id': 'str'},
+  'allow-preconfig': true }

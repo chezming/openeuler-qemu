@@ -27,7 +27,7 @@
 #include "net/slirp.h"
 
 
-#ifndef _WIN32
+#if defined(CONFIG_SLIRP_SMBD)
 #include <pwd.h>
 #include <sys/wait.h>
 #endif
@@ -91,7 +91,7 @@ typedef struct SlirpState {
     Slirp *slirp;
     Notifier poll_notifier;
     Notifier exit_notifier;
-#ifndef _WIN32
+#if defined(CONFIG_SLIRP_SMBD)
     gchar *smb_dir;
 #endif
     GSList *fwd;
@@ -104,7 +104,7 @@ static QTAILQ_HEAD(, SlirpState) slirp_stacks =
 static int slirp_hostfwd(SlirpState *s, const char *redir_str, Error **errp);
 static int slirp_guestfwd(SlirpState *s, const char *config_str, Error **errp);
 
-#ifndef _WIN32
+#if defined(CONFIG_SLIRP_SMBD)
 static int slirp_smb(SlirpState *s, const char *exported_dir,
                      struct in_addr vserver_addr, Error **errp);
 static void slirp_smb_cleanup(SlirpState *s);
@@ -119,7 +119,7 @@ static ssize_t net_slirp_send_packet(const void *pkt, size_t pkt_len,
     uint8_t min_pkt[ETH_ZLEN];
     size_t min_pktsz = sizeof(min_pkt);
 
-    if (!s->nc.peer->do_not_pad) {
+    if (net_peer_needs_padding(&s->nc)) {
         if (eth_pad_short_frame(min_pkt, &min_pktsz, pkt, pkt_len)) {
             pkt = min_pkt;
             pkt_len = min_pktsz;
@@ -377,7 +377,7 @@ static int net_slirp_init(NetClientState *peer, const char *model,
     struct in6_addr ip6_prefix;
     struct in6_addr ip6_host;
     struct in6_addr ip6_dns;
-#ifndef _WIN32
+#if defined(CONFIG_SLIRP_SMBD)
     struct in_addr smbsrv = { .s_addr = 0 };
 #endif
     NetClientState *nc;
@@ -387,9 +387,6 @@ static int net_slirp_init(NetClientState *peer, const char *model,
     int shift;
     char *end;
     struct slirp_config_str *config;
-    NetdevUserOptions *stored;
-    StringList **stored_hostfwd;
-    StringList **stored_guestfwd;
 
     if (!ipv4 && (vnetwork || vhost || vnameserver)) {
         error_setg(errp, "IPv4 disabled but netmask/host/dns provided");
@@ -490,7 +487,7 @@ static int net_slirp_init(NetClientState *peer, const char *model,
         return -1;
     }
 
-#ifndef _WIN32
+#if defined(CONFIG_SLIRP_SMBD)
     if (vsmbserver && !inet_aton(vsmbserver, &smbsrv)) {
         error_setg(errp, "Failed to parse SMB address");
         return -1;
@@ -565,114 +562,9 @@ static int net_slirp_init(NetClientState *peer, const char *model,
 
     nc = qemu_new_net_client(&net_slirp_info, peer, model, name);
 
-    /* Store startup parameters */
-    nc->stored_config = g_new0(NetdevInfo, 1);
-    nc->stored_config->type = NET_BACKEND_USER;
-    stored = &nc->stored_config->u.user;
-
-    if (vhostname) {
-        stored->has_hostname = true;
-        stored->hostname = g_strdup(vhostname);
-    }
-
-    stored->has_q_restrict = true;
-    stored->q_restrict = restricted;
-
-    stored->has_ipv4 = true;
-    stored->ipv4 = ipv4;
-
-    stored->has_ipv6 = true;
-    stored->ipv6 = ipv6;
-
-    if (ipv4) {
-        uint8_t *net_bytes = (uint8_t *)&net;
-        uint8_t *mask_bytes = (uint8_t *)&mask;
-
-        stored->has_net = true;
-        stored->net = g_strdup_printf("%d.%d.%d.%d/%d.%d.%d.%d",
-                                      net_bytes[0], net_bytes[1],
-                                      net_bytes[2], net_bytes[3],
-                                      mask_bytes[0], mask_bytes[1],
-                                      mask_bytes[2], mask_bytes[3]);
-
-        stored->has_host = true;
-        stored->host = g_strdup(inet_ntoa(host));
-    }
-
-    if (tftp_export) {
-        stored->has_tftp = true;
-        stored->tftp = g_strdup(tftp_export);
-    }
-
-    if (bootfile) {
-        stored->has_bootfile = true;
-        stored->bootfile = g_strdup(bootfile);
-    }
-
-    if (vdhcp_start) {
-        stored->has_dhcpstart = true;
-        stored->dhcpstart = g_strdup(vdhcp_start);
-    }
-
-    if (ipv4) {
-        stored->has_dns = true;
-        stored->dns = g_strdup(inet_ntoa(dns));
-    }
-
-    if (dnssearch) {
-        stored->has_dnssearch = true;
-        StringList **stored_list = &stored->dnssearch;
-
-        for (int i = 0; dnssearch[i]; i++) {
-            String *element = g_new0(String, 1);
-
-            element->str = g_strdup(dnssearch[i]);
-            QAPI_LIST_APPEND(stored_list, element);
-        }
-    }
-
-    if (vdomainname) {
-        stored->has_domainname = true;
-        stored->domainname = g_strdup(vdomainname);
-    }
-
-    if (ipv6) {
-        char addrstr[INET6_ADDRSTRLEN];
-        const char *res;
-
-        stored->has_ipv6_prefix = true;
-        stored->ipv6_prefix = g_strdup(vprefix6);
-
-        stored->has_ipv6_prefixlen = true;
-        stored->ipv6_prefixlen = vprefix6_len;
-
-        res = inet_ntop(AF_INET6, &ip6_host,
-                        addrstr, sizeof(addrstr));
-
-        stored->has_ipv6_host = true;
-        stored->ipv6_host = g_strdup(res);
-
-        res = inet_ntop(AF_INET6, &ip6_dns,
-                        addrstr, sizeof(addrstr));
-
-        stored->has_ipv6_dns = true;
-        stored->ipv6_dns = g_strdup(res);
-    }
-
-    if (smb_export) {
-        stored->has_smb = true;
-        stored->smb = g_strdup(smb_export);
-    }
-
-    if (vsmbserver) {
-        stored->has_smbserver = true;
-        stored->smbserver = g_strdup(vsmbserver);
-    }
-
-    if (tftp_server_name) {
-        stored->has_tftp_server_name = true;
-        stored->tftp_server_name = g_strdup(tftp_server_name);
-    }
+    snprintf(nc->info_str, sizeof(nc->info_str),
+             "net=%s,restrict=%s", inet_ntoa(net),
+             restricted ? "on" : "off");
 
     s = DO_UPCAST(SlirpState, nc, nc);
 
@@ -699,28 +591,18 @@ static int net_slirp_init(NetClientState *peer, const char *model,
     s->poll_notifier.notify = net_slirp_poll_notify;
     main_loop_poll_add_notifier(&s->poll_notifier);
 
-    stored_hostfwd = &stored->hostfwd;
-    stored_guestfwd = &stored->guestfwd;
-
     for (config = slirp_configs; config; config = config->next) {
-        String *element = g_new0(String, 1);
-
-        element->str = g_strdup(config->str);
         if (config->flags & SLIRP_CFG_HOSTFWD) {
             if (slirp_hostfwd(s, config->str, errp) < 0) {
                 goto error;
             }
-            stored->has_hostfwd = true;
-            QAPI_LIST_APPEND(stored_hostfwd, element);
         } else {
             if (slirp_guestfwd(s, config->str, errp) < 0) {
                 goto error;
             }
-            stored->has_guestfwd = true;
-            QAPI_LIST_APPEND(stored_guestfwd, element);
         }
     }
-#ifndef _WIN32
+#if defined(CONFIG_SLIRP_SMBD)
     if (smb_export) {
         if (slirp_smb(s, smb_export, smbsrv, errp) < 0) {
             goto error;
@@ -912,7 +794,7 @@ void hmp_hostfwd_add(Monitor *mon, const QDict *qdict)
 
 }
 
-#ifndef _WIN32
+#if defined(CONFIG_SLIRP_SMBD)
 
 /* automatic user mode samba server configuration */
 static void slirp_smb_cleanup(SlirpState *s)
@@ -1027,7 +909,7 @@ static int slirp_smb(SlirpState* s, const char *exported_dir,
     return 0;
 }
 
-#endif /* !defined(_WIN32) */
+#endif /* defined(CONFIG_SLIRP_SMBD) */
 
 static int guestfwd_can_read(void *opaque)
 {

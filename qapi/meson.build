@@ -2,13 +2,13 @@ util_ss.add(files(
   'opts-visitor.c',
   'qapi-clone-visitor.c',
   'qapi-dealloc-visitor.c',
+  'qapi-forward-visitor.c',
   'qapi-util.c',
   'qapi-visit-core.c',
   'qobject-input-visitor.c',
   'qobject-output-visitor.c',
   'string-input-visitor.c',
   'string-output-visitor.c',
-  'hmp-output-visitor.c',
 ))
 if have_system or have_tools
   util_ss.add(files(

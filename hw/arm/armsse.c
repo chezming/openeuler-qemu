@@ -13,6 +13,7 @@
 #include "qemu/log.h"
 #include "qemu/module.h"
 #include "qemu/bitops.h"
+#include "qemu/units.h"
 #include "qapi/error.h"
 #include "trace.h"
 #include "hw/sysbus.h"
@@ -56,8 +57,10 @@ typedef struct ARMSSEDeviceInfo {
 
 struct ARMSSEInfo {
     const char *name;
+    const char *cpu_type;
     uint32_t sse_version;
     int sram_banks;
+    uint32_t sram_bank_base;
     int num_cpus;
     uint32_t sys_version;
     uint32_t iidr;
@@ -68,6 +71,7 @@ struct ARMSSEInfo {
     bool has_cpuid;
     bool has_cpu_pwrctrl;
     bool has_sse_counter;
+    bool has_tcms;
     Property *props;
     const ARMSSEDeviceInfo *devinfo;
     const bool *irq_is_common;
@@ -84,7 +88,7 @@ static Property iotkit_properties[] = {
     DEFINE_PROP_END_OF_LIST()
 };
 
-static Property armsse_properties[] = {
+static Property sse200_properties[] = {
     DEFINE_PROP_LINK("memory", ARMSSE, board_memory, TYPE_MEMORY_REGION,
                      MemoryRegion *),
     DEFINE_PROP_UINT32("EXP_NUMIRQ", ARMSSE, exp_numirq, 64),
@@ -94,6 +98,17 @@ static Property armsse_properties[] = {
     DEFINE_PROP_BOOL("CPU0_DSP", ARMSSE, cpu_dsp[0], false),
     DEFINE_PROP_BOOL("CPU1_FPU", ARMSSE, cpu_fpu[1], true),
     DEFINE_PROP_BOOL("CPU1_DSP", ARMSSE, cpu_dsp[1], true),
+    DEFINE_PROP_END_OF_LIST()
+};
+
+static Property sse300_properties[] = {
+    DEFINE_PROP_LINK("memory", ARMSSE, board_memory, TYPE_MEMORY_REGION,
+                     MemoryRegion *),
+    DEFINE_PROP_UINT32("EXP_NUMIRQ", ARMSSE, exp_numirq, 64),
+    DEFINE_PROP_UINT32("SRAM_ADDR_WIDTH", ARMSSE, sram_addr_width, 18),
+    DEFINE_PROP_UINT32("init-svtor", ARMSSE, init_svtor, 0x10000000),
+    DEFINE_PROP_BOOL("CPU0_FPU", ARMSSE, cpu_fpu[0], true),
+    DEFINE_PROP_BOOL("CPU0_DSP", ARMSSE, cpu_dsp[0], true),
     DEFINE_PROP_END_OF_LIST()
 };
 
@@ -490,7 +505,9 @@ static const ARMSSEInfo armsse_variants[] = {
     {
         .name = TYPE_IOTKIT,
         .sse_version = ARMSSE_IOTKIT,
+        .cpu_type = ARM_CPU_TYPE_NAME("cortex-m33"),
         .sram_banks = 1,
+        .sram_bank_base = 0x20000000,
         .num_cpus = 1,
         .sys_version = 0x41743,
         .iidr = 0,
@@ -501,6 +518,7 @@ static const ARMSSEInfo armsse_variants[] = {
         .has_cpuid = false,
         .has_cpu_pwrctrl = false,
         .has_sse_counter = false,
+        .has_tcms = false,
         .props = iotkit_properties,
         .devinfo = iotkit_devices,
         .irq_is_common = sse200_irq_is_common,
@@ -508,7 +526,9 @@ static const ARMSSEInfo armsse_variants[] = {
     {
         .name = TYPE_SSE200,
         .sse_version = ARMSSE_SSE200,
+        .cpu_type = ARM_CPU_TYPE_NAME("cortex-m33"),
         .sram_banks = 4,
+        .sram_bank_base = 0x20000000,
         .num_cpus = 2,
         .sys_version = 0x22041743,
         .iidr = 0,
@@ -519,14 +539,17 @@ static const ARMSSEInfo armsse_variants[] = {
         .has_cpuid = true,
         .has_cpu_pwrctrl = false,
         .has_sse_counter = false,
-        .props = armsse_properties,
+        .has_tcms = false,
+        .props = sse200_properties,
         .devinfo = sse200_devices,
         .irq_is_common = sse200_irq_is_common,
     },
     {
         .name = TYPE_SSE300,
         .sse_version = ARMSSE_SSE300,
+        .cpu_type = ARM_CPU_TYPE_NAME("cortex-m55"),
         .sram_banks = 2,
+        .sram_bank_base = 0x21000000,
         .num_cpus = 1,
         .sys_version = 0x7e00043b,
         .iidr = 0x74a0043b,
@@ -537,7 +560,8 @@ static const ARMSSEInfo armsse_variants[] = {
         .has_cpuid = true,
         .has_cpu_pwrctrl = true,
         .has_sse_counter = true,
-        .props = armsse_properties,
+        .has_tcms = true,
+        .props = sse300_properties,
         .devinfo = sse300_devices,
         .irq_is_common = sse300_irq_is_common,
     },
@@ -665,17 +689,6 @@ static void armsse_forward_sec_resp_cfg(ARMSSE *s)
     qdev_connect_gpio_out(dev_splitter, 2, s->sec_resp_cfg_in);
 }
 
-static void armsse_mainclk_update(void *opaque, ClockEvent event)
-{
-    ARMSSE *s = ARM_SSE(opaque);
-
-    /*
-     * Set system_clock_scale from our Clock input; this is what
-     * controls the tick rate of the CPU SysTick timer.
-     */
-    system_clock_scale = clock_ticks_to_ns(s->mainclk, 1);
-}
-
 static void armsse_init(Object *obj)
 {
     ARMSSE *s = ARM_SSE(obj);
@@ -687,8 +700,7 @@ static void armsse_init(Object *obj)
     assert(info->sram_banks <= MAX_SRAM_BANKS);
     assert(info->num_cpus <= SSE_MAX_CPUS);
 
-    s->mainclk = qdev_init_clock_in(DEVICE(s), "MAINCLK",
-                                    armsse_mainclk_update, s, ClockUpdate);
+    s->mainclk = qdev_init_clock_in(DEVICE(s), "MAINCLK", NULL, NULL, 0);
     s->s32kclk = qdev_init_clock_in(DEVICE(s), "S32KCLK", NULL, NULL, 0);
 
     memory_region_init(&s->container, obj, "armsse-container", UINT64_MAX);
@@ -708,8 +720,7 @@ static void armsse_init(Object *obj)
         name = g_strdup_printf("armv7m%d", i);
         object_initialize_child(OBJECT(&s->cluster[i]), name, &s->armv7m[i],
                                 TYPE_ARMV7M);
-        qdev_prop_set_string(DEVICE(&s->armv7m[i]), "cpu-type",
-                             ARM_CPU_TYPE_NAME("cortex-m33"));
+        qdev_prop_set_string(DEVICE(&s->armv7m[i]), "cpu-type", info->cpu_type);
         g_free(name);
         name = g_strdup_printf("arm-sse-cpu-container%d", i);
         memory_region_init(&s->cpu_container[i], obj, name, UINT64_MAX);
@@ -895,7 +906,6 @@ static void armsse_realize(DeviceState *dev, Error **errp)
     const ARMSSEDeviceInfo *devinfo;
     int i;
     MemoryRegion *mr;
-    Error *err = NULL;
     SysBusDevice *sbd_apb_ppc0;
     SysBusDevice *sbd_secctl;
     DeviceState *dev_apb_ppc0;
@@ -903,6 +913,8 @@ static void armsse_realize(DeviceState *dev, Error **errp)
     DeviceState *dev_secctl;
     DeviceState *dev_splitter;
     uint32_t addr_width_max;
+
+    ERRP_GUARD();
 
     if (!s->board_memory) {
         error_setg(errp, "memory property was not set");
@@ -970,6 +982,9 @@ static void armsse_realize(DeviceState *dev, Error **errp)
         Object *cpuobj = OBJECT(&s->armv7m[i]);
         int j;
         char *gpioname;
+
+        qdev_connect_clock_in(cpudev, "cpuclk", s->mainclk);
+        /* The SSE subsystems do not wire up a systick refclk */
 
         qdev_prop_set_uint32(cpudev, "num-irq", s->exp_numirq + NUM_SSE_IRQS);
         /*
@@ -1133,10 +1148,9 @@ static void armsse_realize(DeviceState *dev, Error **errp)
         uint32_t sram_bank_size = 1 << s->sram_addr_width;
 
         memory_region_init_ram(&s->sram[i], NULL, ramname,
-                               sram_bank_size, &err);
+                               sram_bank_size, errp);
         g_free(ramname);
-        if (err) {
-            error_propagate(errp, err);
+        if (*errp) {
             return;
         }
         object_property_set_link(OBJECT(&s->mpc[i]), "downstream",
@@ -1147,7 +1161,7 @@ static void armsse_realize(DeviceState *dev, Error **errp)
         /* Map the upstream end of the MPC into the right place... */
         sbd_mpc = SYS_BUS_DEVICE(&s->mpc[i]);
         memory_region_add_subregion(&s->container,
-                                    0x20000000 + i * sram_bank_size,
+                                    info->sram_bank_base + i * sram_bank_size,
                                     sysbus_mmio_get_region(sbd_mpc, 1));
         /* ...and its register interface */
         memory_region_add_subregion(&s->container, 0x50083000 + i * 0x1000,
@@ -1194,6 +1208,20 @@ static void armsse_realize(DeviceState *dev, Error **errp)
                                     sysbus_mmio_get_region(sbd, 0));
         memory_region_add_subregion(&s->container, 0x48101000,
                                     sysbus_mmio_get_region(sbd, 1));
+    }
+
+    if (info->has_tcms) {
+        /* The SSE-300 has an ITCM at 0x0000_0000 and a DTCM at 0x2000_0000 */
+        memory_region_init_ram(&s->itcm, NULL, "sse300-itcm", 512 * KiB, errp);
+        if (*errp) {
+            return;
+        }
+        memory_region_init_ram(&s->dtcm, NULL, "sse300-dtcm", 512 * KiB, errp);
+        if (*errp) {
+            return;
+        }
+        memory_region_add_subregion(&s->container, 0x00000000, &s->itcm);
+        memory_region_add_subregion(&s->container, 0x20000000, &s->dtcm);
     }
 
     /* Devices behind APB PPC0:
@@ -1614,9 +1642,6 @@ static void armsse_realize(DeviceState *dev, Error **errp)
      * devices in the ARMSSE.
      */
     sysbus_init_mmio(SYS_BUS_DEVICE(s), &s->container);
-
-    /* Set initial system_clock_scale from MAINCLK */
-    armsse_mainclk_update(s, ClockUpdate);
 }
 
 static void armsse_idau_check(IDAUInterface *ii, uint32_t address,

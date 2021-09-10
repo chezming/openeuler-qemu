@@ -102,7 +102,7 @@ class Engine(object):
             info.get("downtime", 0),
             info.get("expected-downtime", 0),
             info.get("setup-time", 0),
-            info.get("x-cpu-throttle-percentage", 0),
+            info.get("cpu-throttle-percentage", 0),
         )
 
     def _migrate(self, hardware, scenario, src, dst, connect_uri):
@@ -113,7 +113,7 @@ class Engine(object):
         vcpus = src.command("query-cpus-fast")
         src_threads = []
         for vcpu in vcpus:
-            src_threads.append(vcpu["thread_id"])
+            src_threads.append(vcpu["thread-id"])
 
         # XXX how to get dst timings on remote host ?
 
@@ -135,7 +135,7 @@ class Engine(object):
                                      "state": True }
                                ])
             resp = src.command("migrate-set-parameters",
-                               x_cpu_throttle_increment=scenario._auto_converge_step)
+                               cpu_throttle_increment=scenario._auto_converge_step)
 
         if scenario._post_copy:
             resp = src.command("migrate-set-capabilities",
@@ -153,7 +153,7 @@ class Engine(object):
                            max_bandwidth=scenario._bandwidth * 1024 * 1024)
 
         resp = src.command("migrate-set-parameters",
-                           downtime_limit=scenario._downtime / 1024.0)
+                           downtime_limit=scenario._downtime)
 
         if scenario._compression_mt:
             resp = src.command("migrate-set-capabilities",
@@ -187,6 +187,22 @@ class Engine(object):
                                    hardware._mem *
                                    1024 * 1024 * 1024 / 100 *
                                    scenario._compression_xbzrle_cache))
+
+        if scenario._multifd:
+            resp = src.command("migrate-set-capabilities",
+                               capabilities = [
+                                   { "capability": "multifd",
+                                     "state": True }
+                               ])
+            resp = src.command("migrate-set-parameters",
+                               multifd_channels=scenario._multifd_channels)
+            resp = dst.command("migrate-set-capabilities",
+                               capabilities = [
+                                   { "capability": "multifd",
+                                     "state": True }
+                               ])
+            resp = dst.command("migrate-set-parameters",
+                               multifd_channels=scenario._multifd_channels)
 
         resp = src.command("migrate", uri=connect_uri)
 
@@ -407,7 +423,7 @@ class Engine(object):
             progress_history = ret[0]
             qemu_timings = ret[1]
             vcpu_timings = ret[2]
-            if uri[0:5] == "unix:":
+            if uri[0:5] == "unix:" and os.path.exists(uri[5:]):
                 os.remove(uri[5:])
 
             if os.path.exists(srcmonaddr):

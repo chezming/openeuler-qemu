@@ -22,6 +22,7 @@
 #include "standard-headers/linux/vhost_types.h"
 #include "hw/virtio/virtio-net.h"
 #include "net/vhost_net.h"
+#include "qapi/error.h"
 #include "qemu/error-report.h"
 #include "qemu/main-loop.h"
 
@@ -45,6 +46,7 @@ static const int kernel_feature_bits[] = {
     VIRTIO_NET_F_MTU,
     VIRTIO_F_IOMMU_PLATFORM,
     VIRTIO_F_RING_PACKED,
+    VIRTIO_NET_F_HASH_REPORT,
     VHOST_INVALID_FEATURE_BIT
 };
 
@@ -71,6 +73,8 @@ static const int user_feature_bits[] = {
     VIRTIO_NET_F_MTU,
     VIRTIO_F_IOMMU_PLATFORM,
     VIRTIO_F_RING_PACKED,
+    VIRTIO_NET_F_RSS,
+    VIRTIO_NET_F_HASH_REPORT,
 
     /* This bit implies RARP isn't sent by QEMU out of band */
     VIRTIO_NET_F_GUEST_ANNOUNCE,
@@ -113,7 +117,7 @@ uint64_t vhost_net_get_features(struct vhost_net *net, uint64_t features)
 int vhost_net_get_config(struct vhost_net *net,  uint8_t *config,
                          uint32_t config_len)
 {
-    return vhost_dev_get_config(&net->dev, config, config_len);
+    return vhost_dev_get_config(&net->dev, config, config_len, NULL);
 }
 int vhost_net_set_config(struct vhost_net *net, const uint8_t *data,
                          uint32_t offset, uint32_t size, uint32_t flags)
@@ -154,15 +158,16 @@ struct vhost_net *vhost_net_init(VhostNetOptions *options)
     bool backend_kernel = options->backend_type == VHOST_BACKEND_TYPE_KERNEL;
     struct vhost_net *net = g_new0(struct vhost_net, 1);
     uint64_t features = 0;
+    Error *local_err = NULL;
 
     if (!options->net_backend) {
         fprintf(stderr, "vhost-net requires net backend to be setup\n");
         goto fail;
     }
     net->nc = options->net_backend;
+    net->dev.nvqs = options->nvqs;
 
     net->dev.max_queues = 1;
-    net->dev.nvqs = 2;
     net->dev.vqs = net->vqs;
 
     if (backend_kernel) {
@@ -184,8 +189,10 @@ struct vhost_net *vhost_net_init(VhostNetOptions *options)
     }
 
     r = vhost_dev_init(&net->dev, options->opaque,
-                       options->backend_type, options->busyloop_timeout);
+                       options->backend_type, options->busyloop_timeout,
+                       &local_err);
     if (r < 0) {
+        error_report_err(local_err);
         goto fail;
     }
     if (backend_kernel) {
@@ -234,9 +241,6 @@ static int vhost_net_start_one(struct vhost_net *net,
 {
     struct vhost_vring_file file = { };
     int r;
-
-    net->dev.nvqs = 2;
-    net->dev.vqs = net->vqs;
 
     r = vhost_dev_enable_notifiers(&net->dev, dev);
     if (r < 0) {

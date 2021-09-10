@@ -35,7 +35,6 @@
 #include "qemu/qemu-print.h"
 #include "qemu/option_int.h"
 #include "sysemu/block-backend.h"
-#include "sysemu/sysemu.h"
 #include "migration/misc.h"
 #include "migration/migration.h"
 #include "qemu/cutils.h"
@@ -52,6 +51,15 @@ typedef struct QDevAlias
     const char *alias;
     uint32_t arch_mask;
 } QDevAlias;
+
+/* default virtio transport per architecture */
+#define QEMU_ARCH_VIRTIO_PCI (QEMU_ARCH_ALPHA | QEMU_ARCH_ARM | \
+                              QEMU_ARCH_HPPA | QEMU_ARCH_I386 | \
+                              QEMU_ARCH_MIPS | QEMU_ARCH_PPC |  \
+                              QEMU_ARCH_RISCV | QEMU_ARCH_SH4 | \
+                              QEMU_ARCH_SPARC | QEMU_ARCH_XTENSA)
+#define QEMU_ARCH_VIRTIO_CCW (QEMU_ARCH_S390X)
+#define QEMU_ARCH_VIRTIO_MMIO (QEMU_ARCH_M68K)
 
 /* Please keep this table sorted by typename. */
 static const QDevAlias qdev_alias_table[] = {

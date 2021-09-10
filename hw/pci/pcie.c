@@ -529,7 +529,13 @@ void pcie_cap_slot_init(PCIDevice *dev, PCIESlot *s)
                                PCI_EXP_SLTCAP_PIP |
                                PCI_EXP_SLTCAP_AIP |
                                PCI_EXP_SLTCAP_ABP);
-    if (s->hotplug) {
+
+    /*
+     * Enable native hot-plug on all hot-plugged bridges unless
+     * hot-plug is disabled on the slot.
+     */
+    if (s->hotplug &&
+        (s->native_hotplug || DEVICE(dev)->hotplugged)) {
         pci_long_test_and_set_mask(dev->config + pos + PCI_EXP_SLTCAP,
                                    PCI_EXP_SLTCAP_HPS |
                                    PCI_EXP_SLTCAP_HPC);
@@ -963,16 +969,18 @@ void pcie_dev_ser_num_init(PCIDevice *dev, uint16_t offset, uint64_t ser_num)
     pci_set_quad(dev->config + offset + pci_dsn_cap, ser_num);
 }
 
-void pcie_ats_init(PCIDevice *dev, uint16_t offset)
+void pcie_ats_init(PCIDevice *dev, uint16_t offset, bool aligned)
 {
     pcie_add_capability(dev, PCI_EXT_CAP_ID_ATS, 0x1,
                         offset, PCI_EXT_CAP_ATS_SIZEOF);
 
     dev->exp.ats_cap = offset;
 
-    /* Invalidate Queue Depth 0, Page Aligned Request 1 */
-    pci_set_word(dev->config + offset + PCI_ATS_CAP,
-                 PCI_ATS_CAP_PAGE_ALIGNED);
+    /* Invalidate Queue Depth 0 */
+    if (aligned) {
+        pci_set_word(dev->config + offset + PCI_ATS_CAP,
+                     PCI_ATS_CAP_PAGE_ALIGNED);
+    }
     /* STU 0, Disabled by default */
     pci_set_word(dev->config + offset + PCI_ATS_CTRL, 0);
 

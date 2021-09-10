@@ -20,7 +20,6 @@
 
 #include "qemu/osdep.h"
 #include "qemu/units.h"
-#include "qemu/log.h"
 #include "qemu/error-report.h"
 #include "qapi/error.h"
 #include "hw/boards.h"
@@ -37,7 +36,6 @@
 #include "hw/intc/sifive_plic.h"
 #include "hw/misc/sifive_test.h"
 #include "chardev/char.h"
-#include "sysemu/arch_init.h"
 #include "sysemu/device_tree.h"
 #include "sysemu/sysemu.h"
 #include "hw/pci/pci.h"
@@ -195,6 +193,12 @@ static void create_fdt(RISCVVirtState *s, const MemMapEntry *memmap,
     char *name, *clint_name, *plic_name, *clust_name;
     hwaddr flashsize = virt_memmap[VIRT_FLASH].size / 2;
     hwaddr flashbase = virt_memmap[VIRT_FLASH].base;
+    static const char * const clint_compat[2] = {
+        "sifive,clint0", "riscv,clint0"
+    };
+    static const char * const plic_compat[2] = {
+        "sifive,plic-1.0.0", "riscv,plic0"
+    };
 
     if (mc->dtb) {
         fdt = mc->fdt = load_device_tree(mc->dtb, &s->fdt_size);
@@ -300,7 +304,8 @@ static void create_fdt(RISCVVirtState *s, const MemMapEntry *memmap,
             (memmap[VIRT_CLINT].size * socket);
         clint_name = g_strdup_printf("/soc/clint@%lx", clint_addr);
         qemu_fdt_add_subnode(fdt, clint_name);
-        qemu_fdt_setprop_string(fdt, clint_name, "compatible", "riscv,clint0");
+        qemu_fdt_setprop_string_array(fdt, clint_name, "compatible",
+            (char **)&clint_compat, ARRAY_SIZE(clint_compat));
         qemu_fdt_setprop_cells(fdt, clint_name, "reg",
             0x0, clint_addr, 0x0, memmap[VIRT_CLINT].size);
         qemu_fdt_setprop(fdt, clint_name, "interrupts-extended",
@@ -316,7 +321,8 @@ static void create_fdt(RISCVVirtState *s, const MemMapEntry *memmap,
             "#address-cells", FDT_PLIC_ADDR_CELLS);
         qemu_fdt_setprop_cell(fdt, plic_name,
             "#interrupt-cells", FDT_PLIC_INT_CELLS);
-        qemu_fdt_setprop_string(fdt, plic_name, "compatible", "riscv,plic0");
+        qemu_fdt_setprop_string_array(fdt, plic_name, "compatible",
+            (char **)&plic_compat, ARRAY_SIZE(plic_compat));
         qemu_fdt_setprop(fdt, plic_name, "interrupt-controller", NULL, 0);
         qemu_fdt_setprop(fdt, plic_name, "interrupts-extended",
             plic_cells, s->soc[socket].num_harts * sizeof(uint32_t) * 4);
@@ -395,8 +401,11 @@ static void create_fdt(RISCVVirtState *s, const MemMapEntry *memmap,
         (long)memmap[VIRT_TEST].base);
     qemu_fdt_add_subnode(fdt, name);
     {
-        const char compat[] = "sifive,test1\0sifive,test0\0syscon";
-        qemu_fdt_setprop(fdt, name, "compatible", compat, sizeof(compat));
+        static const char * const compat[3] = {
+            "sifive,test1", "sifive,test0", "syscon"
+        };
+        qemu_fdt_setprop_string_array(fdt, name, "compatible", (char **)&compat,
+                                      ARRAY_SIZE(compat));
     }
     qemu_fdt_setprop_cells(fdt, name, "reg",
         0x0, memmap[VIRT_TEST].base,
@@ -445,7 +454,7 @@ static void create_fdt(RISCVVirtState *s, const MemMapEntry *memmap,
     qemu_fdt_setprop_cell(fdt, name, "interrupts", RTC_IRQ);
     g_free(name);
 
-    name = g_strdup_printf("/soc/flash@%" PRIx64, flashbase);
+    name = g_strdup_printf("/flash@%" PRIx64, flashbase);
     qemu_fdt_add_subnode(mc->fdt, name);
     qemu_fdt_setprop_string(mc->fdt, name, "compatible", "cfi-flash");
     qemu_fdt_setprop_sized_cells(mc->fdt, name, "reg",
@@ -531,6 +540,24 @@ static FWCfgState *create_fw_cfg(const MachineState *mc)
     return fw_cfg;
 }
 
+/*
+ * Return the per-socket PLIC hart topology configuration string
+ * (caller must free with g_free())
+ */
+static char *plic_hart_config_string(int hart_count)
+{
+    g_autofree const char **vals = g_new(const char *, hart_count + 1);
+    int i;
+
+    for (i = 0; i < hart_count; i++) {
+        vals[i] = VIRT_PLIC_HART_CONFIG;
+    }
+    vals[i] = NULL;
+
+    /* g_strjoinv() obliges us to cast away const here */
+    return g_strjoinv(",", (char **)vals);
+}
+
 static void virt_machine_init(MachineState *machine)
 {
     const MemMapEntry *memmap = virt_memmap;
@@ -539,13 +566,12 @@ static void virt_machine_init(MachineState *machine)
     MemoryRegion *main_mem = g_new(MemoryRegion, 1);
     MemoryRegion *mask_rom = g_new(MemoryRegion, 1);
     char *plic_hart_config, *soc_name;
-    size_t plic_hart_config_len;
     target_ulong start_addr = memmap[VIRT_DRAM].base;
     target_ulong firmware_end_addr, kernel_start_addr;
     uint32_t fdt_load_addr;
     uint64_t kernel_entry;
     DeviceState *mmio_plic, *virtio_plic, *pcie_plic;
-    int i, j, base_hartid, hart_count;
+    int i, base_hartid, hart_count;
 
     /* Check socket count limit */
     if (VIRT_SOCKETS_MAX < riscv_socket_count(machine)) {
@@ -594,17 +620,7 @@ static void virt_machine_init(MachineState *machine)
             SIFIVE_CLINT_TIMEBASE_FREQ, true);
 
         /* Per-socket PLIC hart topology configuration string */
-        plic_hart_config_len =
-            (strlen(VIRT_PLIC_HART_CONFIG) + 1) * hart_count;
-        plic_hart_config = g_malloc0(plic_hart_config_len);
-        for (j = 0; j < hart_count; j++) {
-            if (j != 0) {
-                strncat(plic_hart_config, ",", plic_hart_config_len);
-            }
-            strncat(plic_hart_config, VIRT_PLIC_HART_CONFIG,
-                plic_hart_config_len);
-            plic_hart_config_len -= (strlen(VIRT_PLIC_HART_CONFIG) + 1);
-        }
+        plic_hart_config = plic_hart_config_string(hart_count);
 
         /* Per-socket PLIC */
         s->plic[i] = sifive_plic_create(
@@ -671,12 +687,10 @@ static void virt_machine_init(MachineState *machine)
 
     if (riscv_is_32bit(&s->soc[0])) {
         firmware_end_addr = riscv_find_and_load_firmware(machine,
-                                    "opensbi-riscv32-generic-fw_dynamic.bin",
-                                    start_addr, NULL);
+                                    RISCV32_BIOS_BIN, start_addr, NULL);
     } else {
         firmware_end_addr = riscv_find_and_load_firmware(machine,
-                                    "opensbi-riscv64-generic-fw_dynamic.bin",
-                                    start_addr, NULL);
+                                    RISCV64_BIOS_BIN, start_addr, NULL);
     }
 
     if (machine->kernel_filename) {
