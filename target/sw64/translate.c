@@ -1812,7 +1812,8 @@ static DisasJumpType gen_store_conditional(DisasContext *ctx, int ra, int rb,
     lab_done = gen_new_label();
     tcg_gen_brcond_i64(TCG_COND_NE, addr, cpu_lock_addr, lab_fail);
     tcg_temp_free_i64(addr);
-
+    if (test_feature(ctx->env, SW64_FEATURE_CORE3))
+        tcg_gen_brcondi_i64(TCG_COND_NE, cpu_lock_flag, 0x1, lab_fail);
 #ifdef SW64_FIXLOCK
     TCGv val = tcg_temp_new_i64();
     tcg_gen_atomic_cmpxchg_i64(val, cpu_lock_addr, cpu_lock_value,
