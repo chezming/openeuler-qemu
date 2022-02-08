@@ -120,6 +120,8 @@ DEF_HELPER_3(excp, noreturn, env, int, int)
 //DEF_HELPER_FLAGS_3(fsubh, TCG_CALL_NO_RWG, i64, env, i64, i64)
 //DEF_HELPER_FLAGS_3(fmulh, TCG_CALL_NO_RWG, i64, env, i64, i64)
 #ifndef CONFIG_USER_ONLY
+/* Scale factor for core3 cpu freq, ie number of ns per tick. */
+#define CPUFREQ_SCALE 3
 #endif
 
 /* SLAVE FLOAT HELPER. */

@@ -307,7 +307,7 @@ uint64_t helper_read_csr(CPUSW64State *env, uint64_t index)
 uint64_t helper_rtc(void)
 {
 #ifndef CONFIG_USER_ONLY
-    return qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    return qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) * CPUFREQ_SCALE;
 #else
     return 0;
 #endif
