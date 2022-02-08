@@ -161,7 +161,7 @@ static uint64_t intpu_read(void *opaque, hwaddr addr, unsigned size)
     switch (addr) {
     case 0x180:
     /* LONGTIME */
-        ret = qemu_clock_get_ns(QEMU_CLOCK_HOST) / 80;
+        ret = qemu_clock_get_ns(QEMU_CLOCK_HOST) / 32;
         break;
     }
 #endif
