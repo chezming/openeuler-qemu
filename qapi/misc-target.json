@@ -65,7 +65,7 @@
 #
 # Since: 2.8.1
 ##
-{ 'command': 'set-rtc-catchup-speed', 'data': {'speed': 'uint32'}}
+{ 'command': 'set-rtc-catchup-speed', 'data': {'speed': 'uint32'}, 'if': 'TARGET_I386'}
 
 ##
 # @SevState:

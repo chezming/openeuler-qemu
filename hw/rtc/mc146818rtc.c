@@ -110,6 +110,7 @@ static void rtc_coalesced_timer_update(RTCState *s)
 static QLIST_HEAD(, RTCState) rtc_devices =
     QLIST_HEAD_INITIALIZER(rtc_devices);
 
+#ifdef TARGET_I386
 void qmp_set_rtc_catchup_speed(const uint32_t speed, Error **errp)
 {
     RTCState *s;
@@ -125,7 +126,6 @@ void qmp_set_rtc_catchup_speed(const uint32_t speed, Error **errp)
     }
 }
 
-#ifdef TARGET_I386
 void qmp_rtc_reset_reinjection(Error **errp)
 {
     RTCState *s;
