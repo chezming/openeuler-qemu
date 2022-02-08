@@ -126,6 +126,7 @@
 #include "qapi/qmp/qerror.h"
 #include "sysemu/iothread.h"
 #include "qemu/guest-random.h"
+#include "qemu/qemu-timer.inc.h"
 
 #include "config-host.h"
 
@@ -3504,6 +3505,8 @@ void qemu_init(int argc, char **argv, char **envp)
                     runstate_set(RUN_STATE_INMIGRATE);
                 }
                 incoming = optarg;
+
+                qemu_clock_disable_reset();
                 break;
             case QEMU_OPTION_only_migratable:
                 only_migratable = 1;
