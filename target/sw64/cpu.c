@@ -335,7 +335,7 @@ static bool sw64_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 
     if (interrupt_request & CPU_INTERRUPT_HARD) {
         idx = EXCP_DEV_INTERRUPT;
-        env->csr[INT_STAT] |= 1UL << 1;
+        env->csr[INT_STAT] |= 1UL << 12;
         if ((env->csr[IER] & env->csr[INT_STAT]) == 0) return false;
         cs->interrupt_request &= ~CPU_INTERRUPT_HARD;
         goto done;
@@ -343,6 +343,8 @@ static bool sw64_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 
     if (interrupt_request & CPU_INTERRUPT_PCIE) {
         idx = EXCP_DEV_INTERRUPT;
+        env->csr[INT_STAT] |= 1UL << 1;
+        env->csr[INT_PCI_INT] = 0x10;
         if ((env->csr[IER] & env->csr[INT_STAT]) == 0) return false;
         cs->interrupt_request &= ~CPU_INTERRUPT_PCIE;
         goto done;

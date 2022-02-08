@@ -326,7 +326,7 @@ void helper_write_csr(CPUSW64State *env, uint64_t index, uint64_t va)
         tlb_flush(cs);
     }
 //core3
-    if (index == C3_INT_CLR ) {
+    if (index == C3_INT_CLR || index == INT_PCI_INT) {
         env->csr[C3_INT_STAT] &= ~va;
     }
 //core4

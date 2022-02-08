@@ -342,8 +342,6 @@ static void swboard_set_irq(void *opaque, int irq, int level)
         if (cpu != NULL) {
             CPUState *cs = CPU(cpu);
             if (level) {
-                cpu->env.csr[C3_INT_STAT] |= (1UL << irq);
-                cpu->irq = irq;
                 cpu_interrupt(cs, CPU_INTERRUPT_PCIE);
             } else {
                 cpu_reset_interrupt(cs, CPU_INTERRUPT_PCIE);

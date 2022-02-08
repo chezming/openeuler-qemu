@@ -285,6 +285,7 @@ enum {
         SWCSR(C3_INT_STAT,      0x30),
         SWCSR(C3_INT_CLR,       0x31),
         SWCSR(C3_IER,           0x32),
+        SWCSR(INT_PCI_INT,      0x33),
         SWCSR(C3_DVA,           0x4e),
 /* core4 csr */
         SWCSR(INT_EN,           0x1a),
