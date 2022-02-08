@@ -299,6 +299,8 @@ void cpu_sw64_store_fpcr(CPUSW64State* env, uint64_t val) {
 
 uint64_t helper_read_csr(CPUSW64State *env, uint64_t index)
 {
+    if (index == C3_PRI_BASE)
+        return 0x10000;
     return env->csr[index];
 }
 

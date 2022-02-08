@@ -281,6 +281,7 @@ enum {
         SWCSR(II_REQ,           0x82),
 /* core3 csr */
         SWCSR(C3_PTBR,          0x8),
+        SWCSR(C3_PRI_BASE,      0x10),
         SWCSR(C3_INT_STAT,      0x30),
         SWCSR(C3_INT_CLR,       0x31),
         SWCSR(C3_IER,           0x32),
