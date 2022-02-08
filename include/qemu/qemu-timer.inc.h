@@ -20,12 +20,12 @@
  * with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef HUAWEI_INCLUDE_QEMU_QEMU_TIMER_INC_H
-#define HUAWEI_INCLUDE_QEMU_QEMU_TIMER_INC_H
+#ifndef INCLUDE_QEMU_QEMU_TIMER_INC_H
+#define INCLUDE_QEMU_QEMU_TIMER_INC_H
 
 #include "qemu/timer.h"
 
 void qemu_clock_trigger_reset(QEMUClockType type);
 void qemu_clock_disable_reset(void);
 
-#endif /* end of include guard: HUAWEI_INCLUDE_QEMU_QEMU_TIMER_INC_H */
+#endif /* end of include guard: INCLUDE_QEMU_QEMU_TIMER_INC_H */
