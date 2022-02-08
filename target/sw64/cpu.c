@@ -199,7 +199,6 @@ static void sw64_cpu_initfn(Object *obj)
     env->flags = ENV_FLAG_HM_MODE;
 #else
     env->flags = ENV_FLAG_PS_USER;
-    cpu->int_en = 0;
 #endif
     tlb_flush(cs);
 }
@@ -302,10 +301,6 @@ static bool sw64_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
     int idx = -1, INT_STAT = 0, IER = 0;
     /* We never take interrupts while in PALmode.  */
     if (env->flags & ENV_FLAG_HM_MODE)
-        return false;
-
-    cpu->int_en =1;
-    if (cpu->int_en == 0)
         return false;
 
     if (test_feature(env, SW64_FEATURE_CORE3)) {

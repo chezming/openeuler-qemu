@@ -139,7 +139,6 @@ struct SW64CPU {
     uint64_t k_regs[158];
     uint64_t k_vcb[36];
     QEMUTimer *alarm_timer;
-    target_ulong int_en;
     target_ulong irq;
     uint32_t cid;
 };
