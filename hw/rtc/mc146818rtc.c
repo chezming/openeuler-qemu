@@ -110,6 +110,21 @@ static void rtc_coalesced_timer_update(RTCState *s)
 static QLIST_HEAD(, RTCState) rtc_devices =
     QLIST_HEAD_INITIALIZER(rtc_devices);
 
+void qmp_set_rtc_catchup_speed(const uint32_t speed, Error **errp)
+{
+    RTCState *s;
+
+    if (!kvm_rtc_reinject_enable) {
+        return;
+    }
+
+    QLIST_FOREACH(s, &rtc_devices, link) {
+        if (s->lost_tick_policy == LOST_TICK_POLICY_SLEW) {
+            set_rtc_catchup_speed(speed);
+        }
+    }
+}
+
 #ifdef TARGET_I386
 void qmp_rtc_reset_reinjection(Error **errp)
 {

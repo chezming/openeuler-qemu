@@ -24,6 +24,8 @@
 #include "qemu/osdep.h"
 #include "hw/timer/rtc.h"
 #include "sysemu/kvm.h"
+#include "qemu/config-file.h"
+#include "qemu/option.h"
 
 extern int kvm_vm_ioctl(KVMState *s, int type, ...);
 
@@ -62,5 +64,32 @@ void rtc_lost_tick_policy_slew(void)
     ret = kvm_vm_ioctl(kvm_state, KVM_RTC_REINJECT_CONTROL, &control);
     if (ret < 0) {
         QEMU_LOG(LOG_ERR, "Failed to notify kvm to use lost tick policy slew: %d\n", ret);
+    }
+}
+
+uint32_t rtc_catchup_speed(void)
+{
+    uint32_t speed;
+    QemuOpts *opts = qemu_find_opts_singleton("rtc");
+
+    speed = qemu_opt_get_number(opts, "speed", 0);
+    QEMU_LOG(LOG_INFO, "rtc catchup speed: %u\n", speed);
+
+    return speed;
+}
+
+void set_rtc_catchup_speed(const uint32_t speed)
+{
+    struct kvm_rtc_reinject_control control = {};
+    int ret;
+
+    if (speed > 0) {
+        control.flag = KVM_SET_RTC_CATCHUP_SPEED;
+        control.speed = speed;
+        ret = kvm_vm_ioctl(kvm_state, KVM_RTC_REINJECT_CONTROL, &control);
+        if (ret < 0) {
+            QEMU_LOG(LOG_ERR, "Failed to set rtc_catchup_speed: %d\n", ret);
+        }
+        QEMU_LOG(LOG_INFO, "Success to set rtc_catchup_speed: %u\n", speed);
     }
 }
