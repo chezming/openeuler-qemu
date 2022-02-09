@@ -266,7 +266,6 @@ static void aarch64_kunpeng_920_initfn(Object *obj)
     cpu->isar.id_aa64dfr0 = 0x110305408;
     cpu->isar.id_aa64isar0 = 0x10211120;
     cpu->isar.id_aa64mmfr0 = 0x101125;
-    cpu->kvm_target = KVM_ARM_TARGET_GENERIC_V8;
 }
 
 void arm_cpu_sve_finalize(ARMCPU *cpu, Error **errp)
