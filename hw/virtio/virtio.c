@@ -2854,6 +2854,7 @@ static void check_vring_avail_num(VirtIODevice *vdev, int index)
 {
     uint16_t nheads;
 
+    rcu_read_lock();
     /* Check it isn't doing strange things with descriptor numbers. */
     nheads = vring_avail_idx(&vdev->vq[index]) - vdev->vq[index].last_avail_idx;
     if (nheads > vdev->vq[index].vring.num) {
@@ -2864,6 +2865,7 @@ static void check_vring_avail_num(VirtIODevice *vdev, int index)
                  vring_avail_idx(&vdev->vq[index]),
                  vdev->vq[index].last_avail_idx, nheads);
     }
+    rcu_read_unlock();
 }
 
 int virtio_save(VirtIODevice *vdev, QEMUFile *f)
