@@ -45,6 +45,8 @@
 #include "hw/boards.h"
 #include "hw/hw.h"
 #include "trace.h"
+#include "qemu/timer.h"
+#include "qemu/qemu-timer.inc.h"
 
 #ifdef CONFIG_LINUX
 
@@ -65,6 +67,7 @@
 #endif /* CONFIG_LINUX */
 
 static QemuMutex qemu_global_mutex;
+extern QEMUClockType rtc_clock;
 
 bool cpu_is_stopped(CPUState *cpu)
 {
@@ -683,6 +686,7 @@ int vm_prepare_start(void)
         return -1;
     }
 
+    qemu_clock_trigger_reset(rtc_clock);
     /* We are sending this now, but the CPUs will be resumed shortly later */
     qapi_event_send_resume();
 

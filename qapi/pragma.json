@@ -20,7 +20,8 @@
         'set_password',
         'system_powerdown',
         'system_reset',
-        'system_wakeup' ],
+        'system_wakeup',
+        'set-rtc-catchup-speed' ],
     'command-returns-exceptions': [
         'human-monitor-command',
         'qom-get',

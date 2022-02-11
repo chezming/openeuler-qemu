@@ -54,6 +54,18 @@
 { 'command': 'rtc-reset-reinjection',
   'if': 'TARGET_I386' }
 
+##
+# @set-rtc-catchup-speed:
+#
+# set rtc catchup speed
+#
+# @speed: rtc catchup speed
+#
+# Returns: Nothing on success
+#
+# Since: 2.8.1
+##
+{ 'command': 'set-rtc-catchup-speed', 'data': {'speed': 'uint32'}, 'if': 'TARGET_I386'}
 
 ##
 # @SevState:

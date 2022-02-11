@@ -29,6 +29,8 @@
 #include "sysemu/cpu-timers.h"
 #include "sysemu/replay.h"
 #include "sysemu/cpus.h"
+#include "qemu-log.h"
+#include "qemu/qemu-timer.inc.h"
 
 #ifdef CONFIG_POSIX
 #include <pthread.h>
@@ -44,10 +46,14 @@
 
 /***********************************************************/
 /* timers */
+bool g_vm_cold_start_flag = true;
 
 typedef struct QEMUClock {
     /* We rely on BQL to protect the timerlists */
     QLIST_HEAD(, QEMUTimerList) timerlists;
+
+    NotifierList reset_notifiers;
+    int64_t last;
 
     QEMUClockType type;
     bool enabled;
@@ -671,4 +677,24 @@ bool qemu_clock_run_all_timers(void)
     }
 
     return progress;
+}
+
+void qemu_clock_disable_reset(void)
+{
+    g_vm_cold_start_flag = false;
+}
+
+void qemu_clock_trigger_reset(QEMUClockType type)
+{
+    if (!g_vm_cold_start_flag) {
+        return;
+    }
+    if (type == QEMU_CLOCK_VIRTUAL) {
+        int64_t now;
+        QEMUClock *clock = qemu_clock_ptr(type);
+        now = REPLAY_CLOCK(REPLAY_CLOCK_HOST, get_clock_realtime());
+        notifier_list_notify(&clock->reset_notifiers, &now);
+        QEMU_LOG(LOG_INFO, "Guest synchronise time success.\n");
+    }
+    g_vm_cold_start_flag = false;
 }
