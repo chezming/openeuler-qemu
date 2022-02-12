@@ -45,6 +45,8 @@
 #include "qemu/guest-random.h"
 #include "sysemu/hw_accel.h"
 #include "kvm-cpus.h"
+#include "qemu/log.h"
+#include "qemu-common.h"
 
 #include "hw/boards.h"
 
@@ -170,6 +172,7 @@ bool kvm_ioeventfd_any_length_allowed;
 bool kvm_msi_use_devid;
 static bool kvm_immediate_exit;
 static hwaddr kvm_max_slot_size = ~0;
+bool kvm_rtc_reinject_enable;
 
 static const KVMCapabilityInfo kvm_required_capabilites[] = {
     KVM_CAP_INFO(USER_MEMORY),
@@ -2579,6 +2582,11 @@ static int kvm_init(MachineState *ms)
 
     if (s->kernel_irqchip_allowed) {
         kvm_irqchip_create(s);
+    }
+
+    kvm_rtc_reinject_enable = (kvm_check_extension(kvm_state, KVM_CAP_RTC_IRQ_COALESCED) > 0);
+    if (!kvm_rtc_reinject_enable) {
+        qemu_log("kvm rtc irq reinjection not supported.\n");
     }
 
     if (kvm_eventfds_allowed) {

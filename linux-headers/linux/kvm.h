@@ -1112,6 +1112,8 @@ struct kvm_ppc_resize_hpt {
 #define KVM_CAP_BINARY_STATS_FD 203
 #define KVM_CAP_EXIT_ON_EMULATION_FAILURE 204
 #define KVM_CAP_ARM_MTE 205
+/* RTC is emulated in qemu, but the colasced irqs are reinjected in kvm */
+#define KVM_CAP_RTC_IRQ_COALESCED 206
 
 #define KVM_CAP_ARM_CPU_FEATURE 555
 
@@ -1385,6 +1387,7 @@ struct kvm_s390_ucas_mapping {
 #define KVM_S390_UCAS_UNMAP      _IOW(KVMIO, 0x51, struct kvm_s390_ucas_mapping)
 #define KVM_S390_VCPU_FAULT	 _IOW(KVMIO, 0x52, unsigned long)
 
+#define KVM_RTC_REINJECT_CONTROL _IOWR(KVMIO, 0x56, struct kvm_rtc_reinject_control)
 /* Device model IOC */
 #define KVM_CREATE_IRQCHIP        _IO(KVMIO,   0x60)
 #define KVM_IRQ_LINE              _IOW(KVMIO,  0x61, struct kvm_irq_level)

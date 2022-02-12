@@ -33,6 +33,8 @@
 #include "qom/object.h"
 #include "sysemu/replay.h"
 #include "sysemu/sysemu.h"
+#include "sysemu/kvm.h"
+#include "qemu/log.h"
 
 static enum {
     RTC_BASE_UTC,
@@ -198,5 +200,43 @@ void configure_rtc(QemuOpts *opts)
             error_report("invalid option value '%s'", value);
             exit(1);
         }
+    }
+}
+
+uint32_t rtc_get_coalesced_irq(void)
+{
+    struct kvm_rtc_reinject_control control = {};
+    int ret;
+
+    control.flag = KVM_GET_RTC_IRQ_COALESCED;
+    ret = kvm_vm_ioctl(kvm_state, KVM_RTC_REINJECT_CONTROL, &control);
+    if (ret < 0) {
+        qemu_log("Failed to get coalesced irqs from kmod: %d\n", ret);
+    }
+    return control.rtc_irq_coalesced;
+}
+
+void rtc_set_coalesced_irq(uint32_t nr_irqs)
+{
+    struct kvm_rtc_reinject_control control = {};
+    int ret;
+
+    control.rtc_irq_coalesced = nr_irqs;
+    control.flag = KVM_SET_RTC_IRQ_COALESCED;
+    ret = kvm_vm_ioctl(kvm_state, KVM_RTC_REINJECT_CONTROL, &control);
+    if (ret < 0) {
+        qemu_log("Failed to set coalesced irqs to kmod: %d, %u\n", ret, nr_irqs);
+    }
+}
+
+void rtc_lost_tick_policy_slew(void)
+{
+    struct kvm_rtc_reinject_control control = {};
+    int ret;
+
+    control.flag = KVM_RTC_LOST_TICK_POLICY_SLEW;
+    ret = kvm_vm_ioctl(kvm_state, KVM_RTC_REINJECT_CONTROL, &control);
+    if (ret < 0) {
+        qemu_log("Failed to notify kvm to use lost tick policy slew: %d\n", ret);
     }
 }
