@@ -23,12 +23,14 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/log.h"
 #include "monitor-internal.h"
 #include "qapi/error.h"
 #include "qapi/opts-visitor.h"
 #include "qapi/qapi-emit-events.h"
 #include "qapi/qapi-visit-control.h"
 #include "qapi/qmp/qdict.h"
+#include "qapi/qmp/qjson.h"
 #include "qemu/error-report.h"
 #include "qemu/option.h"
 #include "sysemu/qtest.h"
@@ -318,6 +320,7 @@ static void monitor_qapi_event_emit(QAPIEvent event, QDict *qdict)
 {
     Monitor *mon;
     MonitorQMP *qmp_mon;
+    GString *json;
 
     trace_monitor_protocol_event_emit(event, qdict);
     QTAILQ_FOREACH(mon, &mon_list, entry) {
@@ -328,6 +331,13 @@ static void monitor_qapi_event_emit(QAPIEvent event, QDict *qdict)
         qmp_mon = container_of(mon, MonitorQMP, common);
         if (qmp_mon->commands != &qmp_cap_negotiation_commands) {
             qmp_send_response(qmp_mon, qdict);
+            json = qobject_to_json(QOBJECT(qdict));
+            if (json) {
+                if (!strstr(json->str, "RTC_CHANGE")) {
+                    qemu_log("%s\n", json->str);
+                }
+                g_string_free(json, true);
+            }
         }
     }
 }

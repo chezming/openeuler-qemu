@@ -36,6 +36,7 @@
 #include "qemu/option.h"
 #include "qemu/qemu-print.h"
 #include "qemu/option_int.h"
+#include "qemu/log.h"
 #include "sysemu/block-backend.h"
 #include "migration/misc.h"
 #include "migration/migration.h"
@@ -635,6 +636,7 @@ DeviceState *qdev_device_add_from_qdict(const QDict *opts,
     if (path != NULL) {
         bus = qbus_find(path, errp);
         if (!bus) {
+            qemu_log("can not find bus for %s\n", driver);
             return NULL;
         }
         if (!object_dynamic_cast(OBJECT(bus), dc->bus_type)) {
@@ -705,6 +707,8 @@ DeviceState *qdev_device_add_from_qdict(const QDict *opts,
     object_set_properties_from_keyval(&dev->parent_obj, dev->opts, from_json,
                                       errp);
     if (*errp) {
+        qemu_log("the bus %s -driver %s set property failed\n",
+                 bus ? bus->name : "None", driver);
         goto err_del_dev;
     }
 
@@ -729,6 +733,8 @@ DeviceState *qdev_device_add(QemuOpts *opts, Error **errp)
 
     ret = qdev_device_add_from_qdict(qdict, false, errp);
     if (ret) {
+        qemu_log("add qdev %s:%s success\n", qemu_opt_get(opts, "driver"),
+                 qemu_opts_id(opts) ? qemu_opts_id(opts) : "none");
         qemu_opts_del(opts);
     }
     qobject_unref(qdict);
