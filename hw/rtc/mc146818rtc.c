@@ -217,9 +217,17 @@ periodic_timer_update(RTCState *s, int64_t current_time, uint32_t old_period, bo
      */
     if (s->lost_tick_policy == LOST_TICK_POLICY_SLEW) {
         uint32_t old_irq_coalesced = s->irq_coalesced;
+        if (kvm_rtc_reinject_enable) {
+            old_irq_coalesced += rtc_get_coalesced_irq();
+        }
 
         lost_clock += old_irq_coalesced * old_period;
         s->irq_coalesced = lost_clock / s->period;
+        if (kvm_rtc_reinject_enable) {
+            rtc_set_coalesced_irq(s->irq_coalesced);
+            s->irq_coalesced = 0;
+            old_irq_coalesced = 0;
+        }
         lost_clock %= s->period;
         if (old_irq_coalesced != s->irq_coalesced ||
             old_period != s->period) {
@@ -785,6 +793,11 @@ static int rtc_pre_save(void *opaque)
 
     rtc_update_time(s);
 
+    if (kvm_rtc_reinject_enable &&
+        s->lost_tick_policy == LOST_TICK_POLICY_SLEW) {
+        s->irq_coalesced += rtc_get_coalesced_irq();
+    }
+
     return 0;
 }
 
@@ -816,6 +829,13 @@ static int rtc_post_load(void *opaque, int version_id)
             rtc_coalesced_timer_update(s);
         }
     }
+
+    if (kvm_rtc_reinject_enable && s->irq_coalesced != 0 &&
+        s->lost_tick_policy == LOST_TICK_POLICY_SLEW) {
+        rtc_set_coalesced_irq(s->irq_coalesced);
+        s->irq_coalesced = 0;
+    }
+
     return 0;
 }
 
@@ -950,6 +970,10 @@ static void rtc_realizefn(DeviceState *dev, Error **errp)
     object_property_add_tm(OBJECT(s), "date", rtc_get_date);
 
     qdev_init_gpio_out(dev, &s->irq, 1);
+    if (kvm_rtc_reinject_enable &&
+        s->lost_tick_policy == LOST_TICK_POLICY_SLEW) {
+        rtc_lost_tick_policy_slew();
+    }
     QLIST_INSERT_HEAD(&rtc_devices, s, link);
 }
 
