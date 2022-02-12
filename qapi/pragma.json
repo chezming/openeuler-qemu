@@ -27,7 +27,8 @@
         'query-tpm-models',
         'query-tpm-types',
         'ringbuf-read',
-        'query-rtc-date-diff' ],
+        'query-rtc-date-diff',
+        'set-rtc-catchup-speed' ],
     # Externally visible types whose member names may use uppercase
     'member-name-exceptions': [     # visible in:
         'ACPISlotType',             # query-acpi-ospm-status

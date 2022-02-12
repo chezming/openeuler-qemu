@@ -56,6 +56,19 @@
 
 
 ##
+# @set-rtc-catchup-speed:
+#
+# set rtc catchup speed
+#
+# @speed: rtc catchup speed
+#
+# Returns: Nothing on success
+#
+# Since: 6.2.0
+##
+{ 'command': 'set-rtc-catchup-speed', 'data': {'speed': 'uint32'}, 'if': 'TARGET_I386'}
+
+##
 # @SevState:
 #
 # An enumeration of SEV state information used during @query-sev.

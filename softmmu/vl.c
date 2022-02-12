@@ -227,6 +227,9 @@ static QemuOptsList qemu_rtc_opts = {
         },{
             .name = "driftfix",
             .type = QEMU_OPT_STRING,
+        },{
+            .name = "speed",
+            .type = QEMU_OPT_NUMBER,
         },
         { /* end of list */ }
     },
