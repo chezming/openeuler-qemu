@@ -111,6 +111,21 @@ static QLIST_HEAD(, RTCState) rtc_devices =
     QLIST_HEAD_INITIALIZER(rtc_devices);
 
 #ifdef TARGET_I386
+void qmp_set_rtc_catchup_speed(const uint32_t speed, Error **errp)
+{
+    RTCState *s;
+
+    if (!kvm_rtc_reinject_enable) {
+        return;
+    }
+
+    QLIST_FOREACH(s, &rtc_devices, link) {
+        if (s->lost_tick_policy == LOST_TICK_POLICY_SLEW) {
+            set_rtc_catchup_speed(speed);
+        }
+    }
+}
+
 void qmp_rtc_reset_reinjection(Error **errp)
 {
     RTCState *s;
@@ -973,6 +988,7 @@ static void rtc_realizefn(DeviceState *dev, Error **errp)
     if (kvm_rtc_reinject_enable &&
         s->lost_tick_policy == LOST_TICK_POLICY_SLEW) {
         rtc_lost_tick_policy_slew();
+        set_rtc_catchup_speed(rtc_catchup_speed());
     }
     QLIST_INSERT_HEAD(&rtc_devices, s, link);
 }
