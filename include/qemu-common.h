@@ -31,6 +31,27 @@ time_t qemu_timedate_diff(struct tm *tm);
 time_t get_rtc_date_diff(void);
 void set_rtc_date_diff(time_t diff);
 
+/* flags to control coalesced irq */
+#define KVM_GET_RTC_IRQ_COALESCED        (1 << 0)
+#define KVM_SET_RTC_IRQ_COALESCED        (1 << 1)
+#define KVM_RTC_LOST_TICK_POLICY_SLEW    (1 << 2)
+#define KVM_SET_RTC_CATCHUP_SPEED        (1 << 3)
+
+struct kvm_rtc_reinject_control {
+    __u32 rtc_irq_coalesced;
+    __u8 flag;
+    __u8 speed;
+    __u8 reserved[30];
+};
+
+extern bool kvm_rtc_reinject_enable;
+
+uint32_t rtc_get_coalesced_irq(void);
+void rtc_set_coalesced_irq(uint32_t nr_irqs);
+void rtc_lost_tick_policy_slew(void);
+uint32_t rtc_catchup_speed(void);
+void set_rtc_catchup_speed(const uint32_t speed);
+
 void *qemu_oom_check(void *ptr);
 
 ssize_t qemu_write_full(int fd, const void *buf, size_t count)
