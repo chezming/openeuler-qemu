@@ -56,9 +56,13 @@ qapi_trace_events = []
 bsd_oses = ['gnu/kfreebsd', 'freebsd', 'netbsd', 'openbsd', 'dragonfly', 'darwin']
 supported_oses = ['windows', 'freebsd', 'netbsd', 'openbsd', 'darwin', 'sunos', 'linux']
 supported_cpus = ['ppc', 'ppc64', 's390x', 'riscv32', 'riscv64', 'x86', 'x86_64',
-  'arm', 'aarch64', 'loongarch64', 'mips', 'mips64', 'sparc64']
+  'arm', 'aarch64', 'loongarch64', 'mips', 'mips64', 'sparc64', 'sw64']
 
 cpu = host_machine.cpu_family()
+
+if cpu == 'sw_64'
+    cpu = 'sw64'
+endif
 
 target_dirs = config_host['TARGET_DIRS'].split()
 have_linux_user = false
@@ -114,6 +118,8 @@ elif cpu in ['riscv32']
   kvm_targets = ['riscv32-softmmu']
 elif cpu in ['riscv64']
   kvm_targets = ['riscv64-softmmu']
+elif cpu in ['sw64']
+  kvm_targets = ['sw64-softmmu']
 else
   kvm_targets = []
 endif
@@ -680,6 +686,8 @@ if get_option('tcg').allowed()
     tcg_arch = 'i386'
   elif host_arch == 'ppc64'
     tcg_arch = 'ppc'
+  elif host_arch == 'sw64'
+    tcg_arch = 'sw64'
   endif
   add_project_arguments('-iquote', meson.current_source_dir() / 'tcg' / tcg_arch,
                         language: all_languages)
@@ -2881,6 +2889,7 @@ disassemblers = {
   'sparc' : ['CONFIG_SPARC_DIS'],
   'xtensa' : ['CONFIG_XTENSA_DIS'],
   'loongarch' : ['CONFIG_LOONGARCH_DIS'],
+  'sw64' : ['CONFIG_SW64_DIS'],
 }
 
 have_ivshmem = config_host_data.get('CONFIG_EVENTFD')
@@ -3333,6 +3342,7 @@ if have_system
     'hw/sparc',
     'hw/sparc64',
     'hw/ssi',
+    'hw/sw64',
     'hw/timer',
     'hw/tpm',
     'hw/ufs',
