@@ -13,6 +13,7 @@
 #include "qemu/error-report.h"
 #include "sysemu/sysemu.h"
 #include "sysemu/kvm.h"
+#include "sysemu/reset.h"
 #include "hw/ide.h"
 #include "hw/char/serial.h"
 #include "qemu/cutils.h"

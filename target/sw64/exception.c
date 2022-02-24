@@ -8,7 +8,7 @@
 #include "hw/core/cpu.h"
 
 #ifndef CONFIG_USER_ONLY
-void sw64_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
+void QEMU_NORETURN sw64_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
                                   MMUAccessType access_type,
 				  int mmu_idx, uintptr_t retaddr)
 {

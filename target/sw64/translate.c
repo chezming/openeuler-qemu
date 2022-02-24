@@ -5246,6 +5246,14 @@ DisasJumpType translate_one(DisasContextBase *dcbase, uint32_t insn,
         case 0x3f:
             /* LDIH */
             disp16 = ((uint32_t)disp16) << 16;
+	    if (ra == 31) break;
+            va = load_gir(ctx, ra);
+            if (rb == 31) {
+                tcg_gen_movi_i64(va, disp16);
+            } else {
+                tcg_gen_addi_i64(va, load_gir(ctx, rb), (int64_t)disp16);
+            }
+            break;
         case 0x3e:
             /* LDI */
             if (ra == 31) break;

@@ -40,7 +40,7 @@ typedef struct SW64CPUClass {
     CPUClass parent_class;
     /* public */
     DeviceRealize parent_realize;
-    void (*parent_reset)(CPUState *cpu);
+    DeviceReset parent_reset;
 } SW64CPUClass;
 
 typedef struct SW64CPU SW64CPU;

@@ -13,11 +13,13 @@
 #include "qemu/error-report.h"
 #include "sysemu/sysemu.h"
 #include "sysemu/kvm.h"
+#include "sysemu/reset.h"
 #include "hw/ide.h"
 #include "hw/char/serial.h"
 #include "qemu/cutils.h"
 #include "ui/console.h"
 #include "core.h"
+
 static uint64_t cpu_sw64_virt_to_phys(void *opaque, uint64_t addr)
 {
     return addr &= ~0xffffffff80000000;
