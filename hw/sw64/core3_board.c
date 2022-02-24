@@ -80,6 +80,10 @@ static uint64_t mcu_read(void *opaque, hwaddr addr, unsigned size)
 	          ret |= (1UL << i);
 	}
         break;
+   /*IO_START*/
+    case 0x1300:
+        ret = 0x1;
+        break;
     case 0x3780:
     /* MC_ONLINE */
         ret = convert_bit(smp_cpus);

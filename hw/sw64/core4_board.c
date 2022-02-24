@@ -73,12 +73,16 @@ static uint64_t mcu_read(void *opaque, hwaddr addr, unsigned size)
 
     switch (addr) {
     case 0x0000:
-        /* CG_ONLINE */
+    /* CG_ONLINE */
 	{
 	    int i;
             for (i = 0; i < smp_cpus; i = i + 4)
 	        ret |= (1UL << i);
         }
+        break;
+    /*IO_START*/
+    case 0x1300:
+        ret = 0x1;
         break;
     case 0x3780:
 	/* MC_ONLINE */
