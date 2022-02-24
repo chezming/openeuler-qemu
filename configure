@@ -612,6 +612,9 @@ case "$cpu" in
   sparc|sun4[cdmuv])
     cpu="sparc"
   ;;
+  sw_64)
+    cpu="sw64"
+  ;;
   *)
     # This will result in either an error or falling back to TCI later
     ARCH=unknown
