@@ -360,12 +360,13 @@ done:
 }
 #endif
 
-static void sw64_cpu_reset(CPUState *s)
+static void sw64_cpu_reset(DeviceState *dev)
 {
+    CPUState *s = CPU(dev);
     SW64CPU *cpu = SW64_CPU(s);
     SW64CPUClass *scc = SW64_CPU_GET_CLASS(cpu);
 
-    scc->parent_reset(s);
+    scc->parent_reset(dev);
 
 #ifndef CONFIG_USER_ONLY
     if (kvm_enabled()) {

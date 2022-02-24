@@ -111,6 +111,7 @@ void insn_profile(DisasContext *ctx, uint32_t insn)
     case 0x02:
         /* RET */
         index = RET;
+	break;
     case 0x03:
         /* JMP */
         index = JMP;

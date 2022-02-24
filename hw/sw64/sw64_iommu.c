@@ -140,11 +140,10 @@ static bool swvt_do_iommu_translate(SWVTAddressSpace *swvt_as, PCIBus *bus,
     uint8_t bus_num = pci_bus_num(bus);
     unsigned long dtbbaseaddr, dtbbasecond;
     unsigned long pdebaseaddr, ptebaseaddr;
-    unsigned long pde, pte;
+    unsigned long pte;
     uint16_t source_id;
     SW64DTIOTLBEntry *dtcached_entry = NULL;
     SW64DTIOTLBKey dtkey, *new_key;
-    SW64PTIOTLBKey ptkey;
 
     dtcached_entry = g_hash_table_lookup(s->dtiotlb, &dtkey);
 
@@ -200,7 +199,6 @@ static void swvt_ptiotlb_inv_all(SW64IOMMUState *s)
 static void swvt_lookup_ptiotlb(SW64IOMMUState *s, uint16_t source_id,
                                 hwaddr addr, IOMMUTLBEntry *entry)
 {
-    SW64DTIOTLBKey dtkey;
     SW64PTIOTLBKey ptkey;
 
     ptkey.source_id = source_id;
@@ -222,11 +220,9 @@ static IOMMUTLBEntry sw64_translate_iommu(IOMMUMemoryRegion *iommu, hwaddr addr,
          .addr_mask = ~(hwaddr)0,
          .perm = IOMMU_NONE,
     };
-    int ret;
     uint8_t bus_num = pci_bus_num(swvt_as->bus);
     uint16_t source_id;
-    IOMMUTLBEntry *iotlb_entry;
-    SW64PTIOTLBKey ptkey, *new_ptkey;
+    SW64PTIOTLBKey *new_ptkey;
     hwaddr aligned_addr;
 
     source_id = ((bus_num & 0xffUL) << 8) | (swvt_as->devfn & 0xffUL);
@@ -234,9 +230,6 @@ static IOMMUTLBEntry sw64_translate_iommu(IOMMUMemoryRegion *iommu, hwaddr addr,
     qemu_mutex_lock(&s->iommu_lock);
 
     aligned_addr = addr & IOMMU_PAGE_MASK_8K;
-
-    ptkey.source_id = source_id;
-    ptkey.iova = aligned_addr;
 
     swvt_lookup_ptiotlb(s, aligned_addr, source_id, cached_entry);
 
@@ -278,14 +271,6 @@ out:
     entry.addr_mask = cached_entry->addr_mask;
 
     return entry;
-}
-
-static void swvt_iotlb_inv_all(SW64IOMMUState *s)
-{
-    qemu_mutex_lock(&s->iommu_lock);
-    g_hash_table_remove_all(s->ptiotlb);
-    g_hash_table_remove_all(s->dtiotlb);
-    qemu_mutex_unlock(&s->iommu_lock);
 }
 
 static void swvt_ptiotlb_inv_iova(SW64IOMMUState *s, uint16_t source_id, dma_addr_t iova)
@@ -336,7 +321,6 @@ static void swvt_address_space_unmap(SWVTAddressSpace *as, IOMMUNotifier *n)
     hwaddr size;
     hwaddr start = n->start;
     hwaddr end = n->end;
-    SW64IOMMUState *s = as->iommu_state;
 
     assert(start <= end);
     size = end - start;
@@ -350,19 +334,6 @@ static void swvt_address_space_unmap(SWVTAddressSpace *as, IOMMUNotifier *n)
     event.entry.addr_mask = size - 1;
 
     memory_region_notify_iommu_one(n, &event);
-}
-
-static void swvt_address_space_unmap_all(SW64IOMMUState *s)
-{
-    SWVTAddressSpace *swvt_as;
-    IOMMUNotifier *n;
-
-    QLIST_FOREACH(swvt_as, &s->swvt_as_with_notifiers, next) {
-        IOMMU_NOTIFIER_FOREACH(n, &swvt_as->iommu) {
-          //  swvt_iotlb_inv_all(s);
-            swvt_address_space_unmap(swvt_as, n);
-        }
-    }
 }
 
 void swvt_address_space_map_iova(SW64IOMMUState *s, unsigned long val)
@@ -481,7 +452,7 @@ void sw64_vt_iommu_init(PCIBus *b)
     s = SW64_IOMMU(dev_iommu);
 
     s->pci_bus = b;
-    sysbus_realize_and_unref(s, &error_fatal);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(dev_iommu), &error_fatal);
 
     pci_setup_iommu(b, sw64_dma_iommu, dev_iommu);
 
@@ -491,9 +462,10 @@ void sw64_vt_iommu_init(PCIBus *b)
                                  io_piu0);
 }
 
-static void swvt_iommu_notify_flag_changed(IOMMUMemoryRegion *iommu,
+static int swvt_iommu_notify_flag_changed(IOMMUMemoryRegion *iommu,
                                            IOMMUNotifierFlag old,
-                                           IOMMUNotifierFlag new)
+                                           IOMMUNotifierFlag new,
+					   Error **errp)
 {
     SWVTAddressSpace *swvt_as = container_of(iommu, SWVTAddressSpace, iommu);
     SW64IOMMUState *s = swvt_as->iommu_state;
@@ -501,11 +473,17 @@ static void swvt_iommu_notify_flag_changed(IOMMUMemoryRegion *iommu,
     /* Update per-address-space notifier flags */
     swvt_as->notifier_flags = new;
 
+    if (new & IOMMU_NOTIFIER_DEVIOTLB_UNMAP) {
+        error_setg(errp, "swvt does not support dev-iotlb yet");
+        return -EINVAL;
+    }
+
     if (old == IOMMU_NOTIFIER_NONE) {
         QLIST_INSERT_HEAD(&s->swvt_as_with_notifiers, swvt_as, next);
     } else if (new == IOMMU_NOTIFIER_NONE) {
         QLIST_REMOVE(swvt_as, next);
     }
+    return 0;
 }
 
 static void swvt_iommu_replay(IOMMUMemoryRegion *iommu_mr, IOMMUNotifier *n)
