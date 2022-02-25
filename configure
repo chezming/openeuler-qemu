@@ -3271,6 +3271,10 @@ alpha)
   # Ensure there's only a single GP
   QEMU_CFLAGS="-msmall-data $QEMU_CFLAGS"
 ;;
+sw*)
+  # Ensure there's only a single GP
+  cflags="-msmall-data $cflags"
+;;
 esac
 
 if test "$gprof" = "yes" ; then
