@@ -14,10 +14,10 @@
 #include "exec/translator.h"
 #include "exec/log.h"
 
-#define DISAS_PC_UPDATED_NOCHAIN DISAS_TARGET_0
-#define DISAS_PC_UPDATED DISAS_TARGET_1
-#define DISAS_PC_STALE DISAS_TARGET_2
-#define DISAS_PC_UPDATED_T DISAS_TOO_MANY
+#define DISAS_PC_UPDATED_NOCHAIN	DISAS_TARGET_0
+#define DISAS_PC_UPDATED		DISAS_TARGET_1
+#define DISAS_PC_STALE			DISAS_TARGET_2
+#define DISAS_PC_UPDATED_T		DISAS_TOO_MANY
 
 typedef struct DisasContext DisasContext;
 struct DisasContext {

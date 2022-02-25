@@ -2778,7 +2778,7 @@ DisasJumpType translate_one(DisasContextBase *dcbase, uint32_t insn,
             va = load_gir(ctx, ra);
             tcg_gen_mov_i64(cpu_pc, va);
             gen_helper_cpustate_update(cpu_env, va);
-            ret = DISAS_PC_UPDATED;
+            ret = DISAS_PC_UPDATED_NOCHAIN;
             break;
         case 0x08:
             switch (fn4) {
