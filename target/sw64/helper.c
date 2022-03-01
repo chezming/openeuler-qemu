@@ -318,6 +318,7 @@ void helper_write_csr(CPUSW64State *env, uint64_t index, uint64_t va)
     env->csr[index] = va;
 #ifndef CONFIG_USER_ONLY
     CPUState *cs = &(sw64_env_get_cpu(env)->parent_obj);
+    SW64CPU *cpu = SW64_CPU(cs);
     if ((index == DTB_IA) || (index == DTB_IV) || (index == DTB_IVP) ||
         (index == DTB_IU) || (index == DTB_IS) || (index == ITB_IA) ||
         (index == ITB_IV) || (index == ITB_IVP) || (index == ITB_IU) ||
@@ -332,6 +333,10 @@ void helper_write_csr(CPUSW64State *env, uint64_t index, uint64_t va)
 //core4
     if (index == C4_INT_CLR ) {
         env->csr[C4_INT_STAT] &= ~va;
+    }
+
+    if (index == TIMER_CTL && env->csr[index] == 1) {
+	timer_mod(cpu->alarm_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 1000000000 / 250);
     }
 #endif
 }
