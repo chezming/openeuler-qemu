@@ -225,6 +225,7 @@ MemTxResult msi_write(void *opaque, hwaddr addr,
                       uint64_t value, unsigned size,
                       MemTxAttrs attrs)
 {
+#ifdef CONFIG_KVM
     int ret = 0;
     MSIMessage msg = {};
 
@@ -236,6 +237,7 @@ MemTxResult msi_write(void *opaque, hwaddr addr,
         fprintf(stderr, "KVM: injection failed, MSI lost (%s)\n",
                 strerror(-ret));
     }
+#endif
     return MEMTX_OK;
 }
 
