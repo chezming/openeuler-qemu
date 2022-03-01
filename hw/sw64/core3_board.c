@@ -171,7 +171,6 @@ static void intpu_write(void *opaque, hwaddr addr, uint64_t val,
 #ifndef CONFIG_KVM
     MachineState *ms = MACHINE(qdev_get_machine());
     unsigned int smp_cpus = ms->smp.cpus;
-    int i;
     BoardState *bs = (BoardState *)opaque;
     SW64CPU *cpu;
     switch (addr) {
@@ -181,13 +180,6 @@ static void intpu_write(void *opaque, hwaddr addr, uint64_t val,
 	cpu->env.csr[II_REQ] = 0x100000;
 	cpu_interrupt(CPU(cpu),CPU_INTERRUPT_IIMAIL);
 	break;
-    case (0x3 << 7):
-        bs->expire_time = (int64_t)(1000000000 / 250);
-        for (i = 0; i < smp_cpus; i++) {
-            cpu = bs->sboard.cpu[i];
-            if (cpu) timer_mod(cpu->alarm_timer, bs->expire_time);
-        }
-        break;
     default:
         fprintf(stderr, "Unsupported IPU addr: 0x%04lx\n", addr);
         break;
