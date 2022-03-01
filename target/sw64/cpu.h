@@ -20,6 +20,13 @@
 #include "cpu-qom.h"
 #include "fpu/softfloat.h"
 #include "profile.h"
+
+/* QEMU addressing/paging config */
+#define TARGET_PAGE_BITS 13
+#define TARGET_LONG_BITS 64
+#define TARGET_LEVEL_BITS 10
+//#define ALIGNED_ONLY
+
 #include "exec/cpu-defs.h"
 
 /* FIXME: LOCKFIX */
@@ -108,7 +115,6 @@ struct CPUSW64State {
     uint8_t vlenma_idxa;
     uint8_t stable;
 };
-#define SW64_FEATURE_TH1   0x1
 #define SW64_FEATURE_CORE3  0x2
 #define SW64_FEATURE_CORE4  0x4
 
@@ -272,20 +278,20 @@ enum {
         SWCSR(DTB_IVP,          0x44),
         SWCSR(DTB_IU,           0x45),
         SWCSR(DTB_IS,           0x46),
-	SWCSR(II_REQ,           0x82),
+        SWCSR(II_REQ,           0x82),
 /* core3 csr */
         SWCSR(C3_PTBR,          0x8),
-        SWCSR(C3_DVA,           0x4e),
         SWCSR(C3_INT_STAT,      0x30),
         SWCSR(C3_INT_CLR,       0x31),
         SWCSR(C3_IER,           0x32),
+        SWCSR(C3_DVA,           0x4e),
 /* core4 csr */
-	SWCSR(INT_EN,           0x1a),
-        SWCSR(C4_DVA,           0x54),
-        SWCSR(C4_PTBR0,         0x68),
-        SWCSR(C4_PTBR1,         0x69),
+        SWCSR(INT_EN,           0x1a),
         SWCSR(C4_INT_STAT,      0x1b),
         SWCSR(C4_INT_CLR,       0x1c),
+        SWCSR(C4_DVA,           0x54),
+        SWCSR(C4_PTBR_SYS,      0x68),
+        SWCSR(C4_PTBR_USR,      0x69),
 };
 
 #include "exec/cpu-all.h"

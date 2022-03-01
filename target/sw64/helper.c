@@ -46,12 +46,12 @@ static int get_sw64_physical_address(CPUSW64State *env, target_ulong addr,
 {
     CPUState *cs = CPU(sw64_env_get_cpu(env));
     target_ulong phys = 0;
-    int prot = 0, level_bits = 0;
+    int prot = 0;
     int ret = MM_K_ACV;
     target_ulong L1pte, L2pte, L3pte, L4pte;
     target_ulong pt, index, pte_pfn_s;
 
-    if ((((addr >> 28) & 0xffffffff8) == 0xffffffff8) && test_feature(env, SW64_FEATURE_CORE3)) {
+    if (((addr >> 28) & 0xffffffff8) == 0xffffffff8) {
         phys = (~(0xffffffff80000000)) & addr;
         prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
         ret = -1;
@@ -66,15 +66,13 @@ static int get_sw64_physical_address(CPUSW64State *env, target_ulong addr,
     }
 do_pgmiss:
     if (test_feature(env, SW64_FEATURE_CORE3)) {
-	level_bits = 10;
-	pte_pfn_s = 28;
-	pt = env->csr[C3_PTBR];
+        pte_pfn_s = 28;
+        pt = env->csr[C3_PTBR];
     } else if (test_feature(env, SW64_FEATURE_CORE4)) {
-	level_bits = 10;
-	pte_pfn_s = 24;
-	pt = env->csr[C4_PTBR1];
+        pte_pfn_s = 24;
+        pt = env->csr[C4_PTBR_SYS];
     }
-    index = (addr >> (TARGET_PAGE_BITS + 3 * level_bits)) & ((1 << level_bits)-1);
+    index = (addr >> (TARGET_PAGE_BITS + 3 * TARGET_LEVEL_BITS)) & ((1 << TARGET_LEVEL_BITS)-1);
     L1pte = ldq_phys_clear(cs, pt + index * 8);
     if ((L1pte & PTE_VALID) == 0) {
         ret = MM_K_TNV;
@@ -90,7 +88,7 @@ do_pgmiss:
     }
     pt = L1pte >> pte_pfn_s << TARGET_PAGE_BITS;
 
-    index = (addr >> (TARGET_PAGE_BITS + 2 * level_bits)) & ((1 << level_bits)-1);
+    index = (addr >> (TARGET_PAGE_BITS + 2 * TARGET_LEVEL_BITS)) & ((1 << TARGET_LEVEL_BITS)-1);
     L2pte = ldq_phys_clear(cs, pt + index * 8);
 
     if ((L2pte & PTE_VALID) == 0) {
@@ -108,7 +106,7 @@ do_pgmiss:
 
     pt = L2pte >> pte_pfn_s << TARGET_PAGE_BITS;
 
-    index = (addr >> (TARGET_PAGE_BITS + 1 * level_bits)) & ((1 << level_bits)-1);
+    index = (addr >> (TARGET_PAGE_BITS + 1 * TARGET_LEVEL_BITS)) & ((1 << TARGET_LEVEL_BITS)-1);
     L3pte = ldq_phys_clear(cs, pt + index * 8);
 
     if ((L3pte & PTE_VALID) == 0) {
@@ -126,7 +124,7 @@ do_pgmiss:
 
     pt = L3pte >> pte_pfn_s << TARGET_PAGE_BITS;
 
-    index = (addr >> TARGET_PAGE_BITS) & ((1 << level_bits)-1);
+    index = (addr >> TARGET_PAGE_BITS) & ((1 << TARGET_LEVEL_BITS)-1);
     L4pte = ldq_phys_clear(cs, pt + index * 8);
     if ((L4pte & PTE_VALID) == 0) {
         ret = MM_K_TNV;
@@ -175,9 +173,9 @@ bool sw64_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
     int prot, fail, DVA;
 
     if (test_feature(env, SW64_FEATURE_CORE3)) {
-	DVA = C3_DVA;
+        DVA = C3_DVA;
     } else if (test_feature(env, SW64_FEATURE_CORE4)) {
-	DVA = C4_DVA;
+        DVA = C4_DVA;
     }
 
     if (mmu_idx == MMU_PHYS_IDX) {
@@ -321,8 +319,8 @@ void helper_write_csr(CPUSW64State *env, uint64_t index, uint64_t va)
     if ((index == DTB_IA) || (index == DTB_IV) || (index == DTB_IVP) ||
         (index == DTB_IU) || (index == DTB_IS) || (index == ITB_IA) ||
         (index == ITB_IV) || (index == ITB_IVP) || (index == ITB_IU) ||
-        (index == ITB_IS) || (index == C3_PTBR) || (index == C4_PTBR0)
-        || (index == C4_PTBR1)) {
+        (index == ITB_IS) || (index == C3_PTBR) || (index == C4_PTBR_SYS)
+        || (index == C4_PTBR_USR)) {
         tlb_flush(cs);
     }
 //core3
@@ -333,7 +331,6 @@ void helper_write_csr(CPUSW64State *env, uint64_t index, uint64_t va)
     if (index == C4_INT_CLR ) {
         env->csr[C4_INT_STAT] &= ~va;
     }
-
 #endif
 }
 
