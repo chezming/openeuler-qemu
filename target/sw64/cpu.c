@@ -209,9 +209,9 @@ static void sw64_cpu_do_transaction_failed(CPUState *cs, hwaddr physaddr, vaddr 
                               int mmu_idx, MemTxAttrs attrs,
                               MemTxResult response, uintptr_t retaddr)
 {
-#ifdef DEBUGWYH
+#ifdef DEBUG_TRANS
     if (retaddr) {
-        cpu_restore_state(cs, retaddr,true);
+        cpu_restore_state(cs, retaddr, true);
     }
     fprintf(stderr, "PC = %lx, Wrong IO addr. Hwaddr = %lx, vaddr = %lx, access_type = %d\n",
             env->pc, physaddr, addr, access_type);
@@ -315,7 +315,7 @@ static bool sw64_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
         idx = EXCP_IIMAIL;
         env->csr[INT_STAT] |= 1UL << 6;
         if ((env->csr[IER] & env->csr[INT_STAT]) == 0)
-	    return false;
+            return false;
         cs->interrupt_request &= ~CPU_INTERRUPT_IIMAIL;
         goto done;
     }
@@ -323,7 +323,8 @@ static bool sw64_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
     if (interrupt_request & CPU_INTERRUPT_TIMER) {
         idx = EXCP_CLK_INTERRUPT;
         env->csr[INT_STAT] |= 1UL << 4;
-        if ((env->csr[IER] & env->csr[INT_STAT]) == 0) return false;
+        if ((env->csr[IER] & env->csr[INT_STAT]) == 0)
+            return false;
         cs->interrupt_request &= ~CPU_INTERRUPT_TIMER;
         goto done;
     }
@@ -331,7 +332,8 @@ static bool sw64_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
     if (interrupt_request & CPU_INTERRUPT_HARD) {
         idx = EXCP_DEV_INTERRUPT;
         env->csr[INT_STAT] |= 1UL << 12;
-        if ((env->csr[IER] & env->csr[INT_STAT]) == 0) return false;
+        if ((env->csr[IER] & env->csr[INT_STAT]) == 0)
+            return false;
         cs->interrupt_request &= ~CPU_INTERRUPT_HARD;
         goto done;
     }
@@ -340,7 +342,8 @@ static bool sw64_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
         idx = EXCP_DEV_INTERRUPT;
         env->csr[INT_STAT] |= 1UL << 1;
         env->csr[INT_PCI_INT] = 0x10;
-        if ((env->csr[IER] & env->csr[INT_STAT]) == 0) return false;
+        if ((env->csr[IER] & env->csr[INT_STAT]) == 0)
+            return false;
         cs->interrupt_request &= ~CPU_INTERRUPT_PCIE;
         goto done;
     }

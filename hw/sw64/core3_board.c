@@ -70,12 +70,10 @@ static uint64_t mcu_read(void *opaque, hwaddr addr, unsigned size)
     uint64_t ret = 0;
     switch (addr) {
     case 0x0000:
-    /* CG_ONLINE */
-	{
-	    int i;
-	    for (i = 0; i < smp_cpus; i = i + 4)
-	          ret |= (1UL << i);
-	}
+   /* CG_ONLINE */
+        int i;
+        for (i = 0; i < smp_cpus; i = i + 4)
+            ret |= (1UL << i);
         break;
    /*IO_START*/
     case 0x1300:
@@ -118,6 +116,7 @@ static void mcu_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
     uint64_t print_addr;
     uint32_t len;
     int i;
+
     if (addr == 0x40000) {
         print_addr = val & 0x7fffffff;
         len = (uint32_t)(val >> 32);
@@ -322,22 +321,22 @@ static void swboard_set_irq(void *opaque, int irq, int level)
     BoardState *bs = opaque;
     SW64CPU *cpu;
     int i;
+
     if (kvm_enabled()) {
         kvm_set_irq(kvm_state, irq, level);
         return;
     }
+
     for (i = 0; i < 1; i++) {
         cpu = bs->sboard.cpu[i];
         if (cpu != NULL) {
             CPUState *cs = CPU(cpu);
-            if (level) {
+            if (level)
                 cpu_interrupt(cs, CPU_INTERRUPT_PCIE);
-            } else {
+            else
                 cpu_reset_interrupt(cs, CPU_INTERRUPT_PCIE);
-            }
         }
     }
-
 }
 
 static int swboard_map_irq(PCIDevice *d, int irq_num)
@@ -354,13 +353,12 @@ static void serial_set_irq(void *opaque, int irq, int level)
     MachineState *ms = MACHINE(qdev_get_machine());
     unsigned int smp_cpus = ms->smp.cpus;
     int i;
+    if (level == 0)
+        return;
     if (kvm_enabled()) {
         kvm_set_irq(kvm_state, irq, level);
         return;
     }
-    if (level == 0)
-        return;
-
     for (i = 0; i < smp_cpus; i++) {
         if (bs->sboard.cpu[i])
             cpu_irq_change(bs->sboard.cpu[i], 1);
