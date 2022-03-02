@@ -36,6 +36,7 @@ static void core3_init(MachineState *machine)
 {
     ram_addr_t ram_size = machine->ram_size;
     SW64CPU *cpus[machine->smp.max_cpus];
+    ram_addr_t buf;
     long i, size;
     const char *kernel_filename = machine->kernel_filename;
     const char *kernel_cmdline = machine->kernel_cmdline;
@@ -54,7 +55,13 @@ static void core3_init(MachineState *machine)
 	qemu_register_reset(core3_cpu_reset, cpus[i]);
     }
     core3_board_init(cpus, machine->ram);
-    rom_add_blob_fixed("ram_size", (char *)&ram_size, 0x8, 0x2040);
+
+    if (kvm_enabled())
+       buf = ram_size;
+    else
+       buf = ram_size | (1UL << 63);
+
+    rom_add_blob_fixed("ram_size", (char *)&buf, 0x8, 0x2040);
 
     param_offset = 0x90B000UL;
     core3_boot_params->cmdline = param_offset | 0xfff0000000000000UL;
