@@ -240,7 +240,7 @@ uint64_t cpu_sw64_load_fpcr(CPUSW64State *env);
 void cpu_sw64_store_fpcr(CPUSW64State *env, uint64_t val);
 void sw64_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
     MMUAccessType access_type, int mmu_idx,
-    uintptr_t retaddr);
+    uintptr_t retaddr) QEMU_NORETURN;
 bool sw64_cpu_has_work(CPUState *cs);
 extern struct VMStateDescription vmstate_sw64_cpu;
 

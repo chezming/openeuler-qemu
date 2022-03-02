@@ -70,12 +70,14 @@ static uint64_t mcu_read(void *opaque, hwaddr addr, unsigned size)
     uint64_t ret = 0;
     switch (addr) {
     case 0x0000:
-   /* CG_ONLINE */
-        int i;
-        for (i = 0; i < smp_cpus; i = i + 4)
-            ret |= (1UL << i);
+    /* CG_ONLINE */
+        {
+            int i;
+            for (i = 0; i < smp_cpus; i = i + 4)
+                ret |= (1UL << i);
+        }
         break;
-   /*IO_START*/
+    /*IO_START*/
     case 0x1300:
         ret = 0x1;
         break;
@@ -168,8 +170,6 @@ static void intpu_write(void *opaque, hwaddr addr, uint64_t val,
                         unsigned size)
 {
 #ifndef CONFIG_KVM
-    MachineState *ms = MACHINE(qdev_get_machine());
-    unsigned int smp_cpus = ms->smp.cpus;
     BoardState *bs = (BoardState *)opaque;
     SW64CPU *cpu;
     switch (addr) {
