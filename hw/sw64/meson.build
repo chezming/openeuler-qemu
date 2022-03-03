@@ -7,9 +7,4 @@ sw64_ss.add(when: 'CONFIG_CORE3', if_true: files(
   'core3_board.c',
 ))
 
-sw64_ss.add(when: 'CONFIG_CORE4', if_true: files(
-  'core4.c',
-  'core4_board.c',
-))
-
 hw_arch += {'sw64': sw64_ss}

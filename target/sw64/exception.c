@@ -21,10 +21,7 @@ void QEMU_NORETURN sw64_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
     }
 
     fprintf(stderr, "Error %s addr = %lx\n", __func__, addr);
-    if (test_feature(env, SW64_FEATURE_CORE3))
-	env->csr[C3_DVA] = addr;
-    else if (test_feature(env, SW64_FEATURE_CORE4))
-	env->csr[C4_DVA] = addr;
+	env->csr[DVA] = addr;
 
     env->csr[EXC_SUM] = ((insn >> 21) & 31) << 8;	/* opcode */
     env->csr[DS_STAT] = (insn >> 26) << 4;        	/* dest regno */

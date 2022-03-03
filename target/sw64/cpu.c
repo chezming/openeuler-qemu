@@ -125,11 +125,7 @@ static void sw64_cpu_realizefn(DeviceState *dev, Error **errp)
 
 static void sw64_cpu_disas_set_info(CPUState *cs, disassemble_info *info)
 {
-    CPUSW64State *env = cs->env_ptr;
-    if (test_feature(env, SW64_FEATURE_CORE3))
-        info->mach = bfd_mach_sw_64_core3;
-    else if(test_feature(env, SW64_FEATURE_CORE4))
-        info->mach = bfd_mach_sw_64_core4;
+    info->mach = bfd_mach_sw_64_core3;
     info->print_insn = print_insn_sw_64;
 }
 
@@ -144,17 +140,6 @@ static void core3_init(Object *obj)
     parallel_cpus = true;
 #endif
     set_feature(env, SW64_FEATURE_CORE3);
-}
-
-static void core4_init(Object *obj)
-{
-    CPUState *cs = CPU(obj);
-    CPUSW64State *env = cs->env_ptr;
-#ifdef CONFIG_USER_ONLY
-    env->fpcr = 0x680e800000000000;
-    parallel_cpus = true;
-#endif
-    set_feature(env, SW64_FEATURE_CORE4);
 }
 
 static ObjectClass *sw64_cpu_class_by_name(const char *cpu_model)
@@ -263,10 +248,7 @@ static void sw64_cpu_do_interrupt(CPUState *cs)
         break;
     case EXCP_CLK_INTERRUPT:
     case EXCP_DEV_INTERRUPT:
-        if (test_feature(env, SW64_FEATURE_CORE3))
-                i = 0xE80;/* core3 */
-        else if (test_feature(env, SW64_FEATURE_CORE4))
-                i = 0xE00;/* core4 */
+        i = 0xE80;
         break;
     case EXCP_MMFAULT:
         i = 0x980;
@@ -298,18 +280,10 @@ static bool sw64_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 {
     SW64CPU *cpu = SW64_CPU(cs);
     CPUSW64State *env = &cpu->env;
-    int idx = -1, INT_STAT = 0, IER = 0;
+    int idx = -1;
     /* We never take interrupts while in PALmode.  */
     if (env->flags & ENV_FLAG_HM_MODE)
         return false;
-
-    if (test_feature(env, SW64_FEATURE_CORE3)) {
-        IER = C3_IER;
-	INT_STAT = C3_INT_STAT;
-    } else if (test_feature(env, SW64_FEATURE_CORE4)) {
-	IER = INT_EN;
-	INT_STAT = C4_INT_STAT;
-    }
 
     if (interrupt_request & CPU_INTERRUPT_IIMAIL) {
         idx = EXCP_IIMAIL;
@@ -440,10 +414,6 @@ static const SW64CPUInfo sw64_cpus[] =
     {
         .name = "core3",
         .initfn = core3_init,
-    },
-    {
-        .name = "core4",
-        .initfn = core4_init,
     },
     {
         .name = NULL

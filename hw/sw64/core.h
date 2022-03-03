@@ -13,7 +13,6 @@ typedef struct boot_params {
         unsigned long cmdline;                          /* logical address of cmdline */
 } BOOT_PARAMS;
 
-void core4_board_init(SW64CPU *cpus[4], MemoryRegion *ram);
 void core3_board_init(SW64CPU *cpus[4], MemoryRegion *ram);
 #endif
 

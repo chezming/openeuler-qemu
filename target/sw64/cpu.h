@@ -116,7 +116,6 @@ struct CPUSW64State {
     uint8_t stable;
 };
 #define SW64_FEATURE_CORE3  0x2
-#define SW64_FEATURE_CORE4  0x4
 
 static inline void set_feature(CPUSW64State *env, int feature)
 {
@@ -278,22 +277,15 @@ enum {
         SWCSR(DTB_IU,           0x45),
         SWCSR(DTB_IS,           0x46),
         SWCSR(II_REQ,           0x82),
-/* core3 csr */
-        SWCSR(C3_PTBR,          0x8),
-        SWCSR(C3_PRI_BASE,      0x10),
+
+        SWCSR(PTBR,             0x8),
+        SWCSR(PRI_BASE,         0x10),
         SWCSR(TIMER_CTL,        0x2a),
-        SWCSR(C3_INT_STAT,      0x30),
-        SWCSR(C3_INT_CLR,       0x31),
-        SWCSR(C3_IER,           0x32),
+        SWCSR(INT_STAT,         0x30),
+        SWCSR(INT_CLR,          0x31),
+        SWCSR(IER,              0x32),
         SWCSR(INT_PCI_INT,      0x33),
-        SWCSR(C3_DVA,           0x4e),
-/* core4 csr */
-        SWCSR(INT_EN,           0x1a),
-        SWCSR(C4_INT_STAT,      0x1b),
-        SWCSR(C4_INT_CLR,       0x1c),
-        SWCSR(C4_DVA,           0x54),
-        SWCSR(C4_PTBR_SYS,      0x68),
-        SWCSR(C4_PTBR_USR,      0x69),
+        SWCSR(DVA,              0x4e),
 };
 
 #include "exec/cpu-all.h"

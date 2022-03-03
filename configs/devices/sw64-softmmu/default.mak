@@ -8,4 +8,3 @@
 # Boards:
 #
 CONFIG_CORE3=y
-CONFIG_CORE4=y

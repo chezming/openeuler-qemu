@@ -65,13 +65,8 @@ static int get_sw64_physical_address(CPUSW64State *env, target_ulong addr,
         goto exit;
     }
 do_pgmiss:
-    if (test_feature(env, SW64_FEATURE_CORE3)) {
-        pte_pfn_s = 28;
-        pt = env->csr[C3_PTBR];
-    } else if (test_feature(env, SW64_FEATURE_CORE4)) {
-        pte_pfn_s = 24;
-        pt = env->csr[C4_PTBR_SYS];
-    }
+    pte_pfn_s = 28;
+    pt = env->csr[PTBR];
     index = (addr >> (TARGET_PAGE_BITS + 3 * TARGET_LEVEL_BITS)) & ((1 << TARGET_LEVEL_BITS)-1);
     L1pte = ldq_phys_clear(cs, pt + index * 8);
     if ((L1pte & PTE_VALID) == 0) {
@@ -170,13 +165,7 @@ bool sw64_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
     SW64CPU *cpu = SW64_CPU(cs);
     CPUSW64State *env = &cpu->env;
     target_ulong phys;
-    int prot, fail, DVA;
-
-    if (test_feature(env, SW64_FEATURE_CORE3)) {
-        DVA = C3_DVA;
-    } else if (test_feature(env, SW64_FEATURE_CORE4)) {
-        DVA = C4_DVA;
-    }
+    int prot, fail;
 
     if (mmu_idx == MMU_PHYS_IDX) {
         phys = address;
@@ -195,7 +184,7 @@ do_pgmiss:
 	cs->exception_index = EXCP_MMFAULT;
 	if (access_type == 2) {
             env->csr[DS_STAT] = fail;
-	    env->csr[DVA] = address & ~(3UL);
+            env->csr[DVA] = address & ~(3UL);
         } else {
             env->csr[DS_STAT] = fail | (((unsigned long)access_type + 1) << 3);
             env->csr[DVA] = address;
@@ -288,9 +277,6 @@ void cpu_sw64_store_fpcr(CPUSW64State* env, uint64_t val) {
         (fpcr & FPCR_MASK(UNFD)) && (fpcr & FPCR_MASK(UNDZ));
     env->fp_status.flush_to_zero = env->fpcr_flush_to_zero;
 
-    /* FIXME: Now the DNZ flag does not work int C3A. */
-    //set_flush_inputs_to_zero((val & FPCR_MASK(DNZ)) != 0? 1 : 0, &FP_STATUS);
-
     val &= ~0x3UL;
     val |= env->fpcr & 0x3UL;
     env->fpcr = val;
@@ -299,7 +285,7 @@ void cpu_sw64_store_fpcr(CPUSW64State* env, uint64_t val) {
 
 uint64_t helper_read_csr(CPUSW64State *env, uint64_t index)
 {
-    if (index == C3_PRI_BASE)
+    if (index == PRI_BASE)
         return 0x10000;
     return env->csr[index];
 }
@@ -322,17 +308,11 @@ void helper_write_csr(CPUSW64State *env, uint64_t index, uint64_t va)
     if ((index == DTB_IA) || (index == DTB_IV) || (index == DTB_IVP) ||
         (index == DTB_IU) || (index == DTB_IS) || (index == ITB_IA) ||
         (index == ITB_IV) || (index == ITB_IVP) || (index == ITB_IU) ||
-        (index == ITB_IS) || (index == C3_PTBR) || (index == C4_PTBR_SYS)
-        || (index == C4_PTBR_USR)) {
+        (index == ITB_IS) || (index == PTBR)) {
         tlb_flush(cs);
     }
-//core3
-    if (index == C3_INT_CLR || index == INT_PCI_INT) {
-        env->csr[C3_INT_STAT] &= ~va;
-    }
-//core4
-    if (index == C4_INT_CLR ) {
-        env->csr[C4_INT_STAT] &= ~va;
+    if (index == INT_CLR || index == INT_PCI_INT) {
+        env->csr[INT_STAT] &= ~va;
     }
 
     if (index == TIMER_CTL && env->csr[index] == 1) {
