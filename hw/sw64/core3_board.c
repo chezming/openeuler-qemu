@@ -468,8 +468,6 @@ void core3_board_init(SW64CPU *cpus[MAX_CPUS], MemoryRegion *ram)
                        DEVICE_LITTLE_ENDIAN);
     }
     pci_create_simple(phb->bus, -1, "nec-usb-xhci");
-    usb_create_simple(usb_bus_find(-1), "usb-kbd");
-    usb_create_simple(usb_bus_find(-1), "usb-mouse");
     sun4v_rtc_init(0x804910000000ULL);
 }
 
