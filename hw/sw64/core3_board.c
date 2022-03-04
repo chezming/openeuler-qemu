@@ -323,6 +323,8 @@ static void swboard_set_irq(void *opaque, int irq, int level)
     int i;
 
     if (kvm_enabled()) {
+        if (level == 0)
+            return;
         kvm_set_irq(kvm_state, irq, level);
         return;
     }
