@@ -20,7 +20,6 @@
 #include "hw/pci/msi.h"
 #include "hw/sw64/sw64_iommu.h"
 
-#define MAX_CPUS 64
 #define TYPE_SWBOARD_PCI_HOST_BRIDGE "core_board-pcihost"
 #define SWBOARD_PCI_HOST_BRIDGE(obj) \
     OBJECT_CHECK(BoardState, (obj), TYPE_SWBOARD_PCI_HOST_BRIDGE)
@@ -29,7 +28,7 @@
 #define SW_PIN_TO_IRQ 16
 
 typedef struct SWBoard {
-    SW64CPU *cpu[MAX_CPUS];
+    SW64CPU *cpu[MAX_CPUS_CORE3];
 } SWBoard;
 
 typedef struct BoardState {

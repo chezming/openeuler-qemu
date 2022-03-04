@@ -17,3 +17,9 @@ void core3_board_init(SW64CPU *cpus[4], MemoryRegion *ram);
 #endif
 
 #define MAX_CPUS 64
+
+#ifdef CONFIG_KVM
+#define MAX_CPUS_CORE3 64
+#else
+#define MAX_CPUS_CORE3 32
+#endif
