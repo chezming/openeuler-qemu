@@ -19,10 +19,56 @@
 #include "qemu/cutils.h"
 #include "ui/console.h"
 #include "core.h"
+#include "hw/boards.h"
+#include "sysemu/numa.h"
 
 static uint64_t cpu_sw64_virt_to_phys(void *opaque, uint64_t addr)
 {
     return addr &= ~0xffffffff80000000 ;
+}
+
+static CpuInstanceProperties
+sw64_cpu_index_to_props(MachineState *ms, unsigned cpu_index)
+{
+    MachineClass *mc = MACHINE_GET_CLASS(ms);
+    const CPUArchIdList *possible_cpus = mc->possible_cpu_arch_ids(ms);
+
+    assert(cpu_index < possible_cpus->len);
+    return possible_cpus->cpus[cpu_index].props;
+}
+
+static int64_t sw64_get_default_cpu_node_id(const MachineState *ms, int idx)
+{
+    int nb_numa_nodes = ms->numa_state->num_nodes;
+    return idx % nb_numa_nodes;
+}
+
+static const CPUArchIdList *sw64_possible_cpu_arch_ids(MachineState *ms)
+{
+    int i;
+    unsigned int max_cpus = ms->smp.max_cpus;
+
+    if (ms->possible_cpus) {
+        /*
+         * make sure that max_cpus hasn't changed since the first use, i.e.
+         * -smp hasn't been parsed after it
+        */
+        assert(ms->possible_cpus->len == max_cpus);
+        return ms->possible_cpus;
+    }
+
+    ms->possible_cpus = g_malloc0(sizeof(CPUArchIdList) +
+                                  sizeof(CPUArchId) * max_cpus);
+    ms->possible_cpus->len = max_cpus;
+    for (i = 0; i < ms->possible_cpus->len; i++) {
+        ms->possible_cpus->cpus[i].type = ms->cpu_type;
+        ms->possible_cpus->cpus[i].vcpus_count = 1;
+        ms->possible_cpus->cpus[i].arch_id = i;
+        ms->possible_cpus->cpus[i].props.has_thread_id = true;
+        ms->possible_cpus->cpus[i].props.core_id = i;
+    }
+
+    return ms->possible_cpus;
 }
 
 static void core3_cpu_reset(void *opaque)
@@ -35,8 +81,8 @@ static void core3_cpu_reset(void *opaque)
 static void core3_init(MachineState *machine)
 {
     ram_addr_t ram_size = machine->ram_size;
-    SW64CPU *cpus[machine->smp.max_cpus];
     ram_addr_t buf;
+    SW64CPU *cpus[machine->smp.max_cpus];
     long i, size;
     const char *kernel_filename = machine->kernel_filename;
     const char *kernel_cmdline = machine->kernel_cmdline;
@@ -55,11 +101,10 @@ static void core3_init(MachineState *machine)
 	qemu_register_reset(core3_cpu_reset, cpus[i]);
     }
     core3_board_init(cpus, machine->ram);
-
     if (kvm_enabled())
-       buf = ram_size;
+        buf = ram_size;
     else
-       buf = ram_size | (1UL << 63);
+        buf = ram_size | (1UL << 63);
 
     rom_add_blob_fixed("ram_size", (char *)&buf, 0x8, 0x2040);
 
@@ -123,8 +168,11 @@ static void core3_machine_init(MachineClass *mc)
     mc->max_cpus = MAX_CPUS;
     mc->is_default = 0;
     mc->reset = board_reset;
+    mc->possible_cpu_arch_ids = sw64_possible_cpu_arch_ids;
+    mc->cpu_index_to_instance_props = sw64_cpu_index_to_props;
     mc->default_cpu_type = SW64_CPU_TYPE_NAME("core3");
     mc->default_ram_id = "ram";
+    mc->get_default_cpu_node_id = sw64_get_default_cpu_node_id;
 }
 
 DEFINE_MACHINE("core3", core3_machine_init)
