@@ -26,6 +26,7 @@
     OBJECT_CHECK(BoardState, (obj), TYPE_SWBOARD_PCI_HOST_BRIDGE)
 
 #define MAX_IDE_BUS 2
+#define SW_PIN_TO_IRQ 16
 
 typedef struct SWBoard {
     SW64CPU *cpu[MAX_CPUS];
@@ -53,6 +54,15 @@ static void swboard_alarm_timer(void *opaque)
     cpu_interrupt(CPU(bs->sboard.cpu[cpu]), CPU_INTERRUPT_TIMER);
 }
 #endif
+
+static PCIINTxRoute sw_route_intx_pin_to_irq(void *opaque, int pin)
+{
+       PCIINTxRoute route;
+
+       route.mode = PCI_INTX_ENABLED;
+       route.irq = SW_PIN_TO_IRQ;
+       return route;
+}
 
 static uint64_t convert_bit(int n)
 {
@@ -439,7 +449,7 @@ void core3_board_init(SW64CPU *cpus[MAX_CPUS], MemoryRegion *ram)
     phb->bus = b;
 //    qdev_init_nofail(dev);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
-
+    pci_bus_set_route_irq_fn(b, sw_route_intx_pin_to_irq);
     memory_region_init_io(conf_piu0, OBJECT(bs), &core3_pci_config_ops, b,
                           "pci0-ep-conf-io", 4 * GB);
     memory_region_add_subregion(get_system_memory(), 0x880600000000ULL,
