@@ -23,20 +23,17 @@ struct target_pt_regs {
     abi_ulong r27;
     abi_ulong r28;
     abi_ulong hae;
-/* JRP - These are the values provided to a0-a2 by PALcode */
+/* JRP - These are the values provided to a0-a2 by HMcode */
     abi_ulong trap_a0;
     abi_ulong trap_a1;
     abi_ulong trap_a2;
-/* These are saved by PAL-code: */
+/* These are saved by HMcode: */
     abi_ulong ps;
     abi_ulong pc;
     abi_ulong gp;
     abi_ulong r16;
     abi_ulong r17;
     abi_ulong r18;
-/* Those is needed by qemu to temporary store the user stack pointer */
-    abi_ulong usp;
-    abi_ulong unique;
 };
 
 #define TARGET_MLOCKALL_MCL_CURRENT     0x2000

@@ -1,5 +1,5 @@
 /*
- * sw_64-dis.c -- Disassemble Sw_64 AXP instructions
+ * sw64-dis.c -- Disassemble SW64 CORE3 instructions
  * Copyright (C) 1996-2015 Free Software Foundation, Inc.
  * Contributed by Richard Henderson <rth@tamu.edu>,
  * patterned after the PPC opcode handling written by Ian Lance Taylor.
@@ -27,7 +27,7 @@
 
 #undef MAX
 
-struct sw_64_opcode {
+struct sw64_opcode {
     /* The opcode name. */
     const char *name;
 
@@ -55,27 +55,27 @@ struct sw_64_opcode {
 /* The table itself is sorted by major opcode number, and is otherwise
    in the order in which the disassembler should consider
    instructions. */
-extern const struct sw_64_opcode sw_64_opcodes[];
-extern const unsigned sw_64_num_opcodes;
+extern const struct sw64_opcode sw64_opcodes[];
+extern const unsigned sw64_num_opcodes;
 
-/* Values defined for the flags field of a struct sw_64_opcode. */
+/* Values defined for the flags field of a struct sw64_opcode. */
 
 /* CPU Availability */
-#define AXP_OPCODE_BASE		0x0001  /* Base architecture insns. */
-#define AXP_OPCODE_CORE3	0x0002  /* Core3 private insns. */
-#define AXP_LITOP(i)		(((i) >> 26) & 0x3D)
+#define SW_OPCODE_BASE		0x0001  /* Base architecture insns. */
+#define SW_OPCODE_CORE3	0x0002  /* Core3 private insns. */
+#define SW_LITOP(i)		(((i) >> 26) & 0x3D)
 
-#define AXP_OPCODE_NOPAL        (~(AXP_OPCODE_BASE|AXP_OPCODE_CORE3))
+#define SW_OPCODE_NOPAL        (~(SW_OPCODE_BASE|SW_OPCODE_CORE3))
 
 /* A macro to extract the major opcode from an instruction. */
-#define AXP_OP(i)               (((i) >> 26) & 0x3F)
+#define SW_OP(i)               (((i) >> 26) & 0x3F)
 
 /* The total number of major opcodes. */
-#define AXP_NOPS                0x40
+#define SW_NOPS                0x40
 
-/* The operands table is an array of struct sw_64_operand. */
+/* The operands table is an array of struct sw64_operand. */
 
-struct sw_64_operand {
+struct sw64_operand {
     /* The number of bits in the operand. */
     unsigned int bits : 5;
 
@@ -111,7 +111,7 @@ struct sw_64_operand {
 
        If it is NULL, compute
        op = ((i) >> o->shift) & ((1 << o->bits) - 1);
-       if ((o->flags & AXP_OPERAND_SIGNED) != 0
+       if ((o->flags & SW_OPERAND_SIGNED) != 0
        && (op & (1 << (o->bits - 1))) != 0)
        op -= 1 << o->bits;
        (i is the instruction, o is a pointer to this structure, and op
@@ -127,17 +127,17 @@ struct sw_64_operand {
 };
 
 /* Elements in the table are retrieved by indexing with values from
-   the operands field of the sw_64_opcodes table. */
+   the operands field of the sw64_opcodes table. */
 
-extern const struct sw_64_operand sw_64_operands[];
-extern const unsigned sw_64_num_operands;
-/* Values defined for the flags field of a struct sw_64_operand. */
+extern const struct sw64_operand sw64_operands[];
+extern const unsigned sw64_num_operands;
+/* Values defined for the flags field of a struct sw64_operand. */
 
 /* Mask for selecting the type for typecheck purposes */
-#define AXP_OPERAND_TYPECHECK_MASK					\
-    (AXP_OPERAND_PARENS | AXP_OPERAND_COMMA | AXP_OPERAND_IR |		\
-     AXP_OPERAND_FPR | AXP_OPERAND_RELATIVE | AXP_OPERAND_SIGNED | 	\
-     AXP_OPERAND_UNSIGNED)
+#define SW_OPERAND_TYPECHECK_MASK					\
+    (SW_OPERAND_PARENS | SW_OPERAND_COMMA | SW_OPERAND_IR |		\
+     SW_OPERAND_FPR | SW_OPERAND_RELATIVE | SW_OPERAND_SIGNED | 	\
+     SW_OPERAND_UNSIGNED)
 
 /* This operand does not actually exist in the assembler input.  This
    is used to support extended mnemonics, for which two operands fields
@@ -145,92 +145,92 @@ extern const unsigned sw_64_num_operands;
    any op value.  The disassembler should call the extract function,
    ignore the return value, and check the value placed in the invalid
    argument. */
-#define AXP_OPERAND_FAKE                01
+#define SW_OPERAND_FAKE                01
 
 /* The operand should be wrapped in parentheses rather than separated
    from the previous by a comma.  This is used for the load and store
    instructions which want their operands to look like "Ra,disp(Rb)". */
-#define AXP_OPERAND_PARENS              02
+#define SW_OPERAND_PARENS              02
 
 /* Used in combination with PARENS, this supresses the supression of
    the comma.  This is used for "jmp Ra,(Rb),hint". */
-#define AXP_OPERAND_COMMA               04
+#define SW_OPERAND_COMMA               04
 
 /* This operand names an integer register. */
-#define AXP_OPERAND_IR                  010
+#define SW_OPERAND_IR                  010
 
 /* This operand names a floating point register. */
-#define AXP_OPERAND_FPR                 020
+#define SW_OPERAND_FPR                 020
 
 /* This operand is a relative branch displacement.  The disassembler
    prints these symbolically if possible. */
-#define AXP_OPERAND_RELATIVE            040
+#define SW_OPERAND_RELATIVE            040
 
 /* This operand takes signed values. */
-#define AXP_OPERAND_SIGNED              0100
+#define SW_OPERAND_SIGNED              0100
 
 /* This operand takes unsigned values.  This exists primarily so that
    a flags value of 0 can be treated as end-of-arguments. */
-#define AXP_OPERAND_UNSIGNED            0200
+#define SW_OPERAND_UNSIGNED            0200
 
 /* Supress overflow detection on this field.  This is used for hints. */
-#define AXP_OPERAND_NOOVERFLOW          0400
+#define SW_OPERAND_NOOVERFLOW          0400
 
 /* Mask for optional argument default value. */
-#define AXP_OPERAND_OPTIONAL_MASK       07000
+#define SW_OPERAND_OPTIONAL_MASK       07000
 
 /* This operand defaults to zero.  This is used for jump hints. */
-#define AXP_OPERAND_DEFAULT_ZERO        01000
+#define SW_OPERAND_DEFAULT_ZERO        01000
 
 /* This operand should default to the first (real) operand and is used
-   in conjunction with AXP_OPERAND_OPTIONAL.  This allows
+   in conjunction with SW_OPERAND_OPTIONAL.  This allows
    "and $0,3,$0" to be written as "and $0,3", etc.  I don't like
    it, but it's what DEC does. */
-#define AXP_OPERAND_DEFAULT_FIRST       02000
+#define SW_OPERAND_DEFAULT_FIRST       02000
 
 /* Similarly, this operand should default to the second (real) operand.
    This allows "negl $0" instead of "negl $0,$0". */
-#define AXP_OPERAND_DEFAULT_SECOND      04000
+#define SW_OPERAND_DEFAULT_SECOND      04000
 
 /* Register common names */
 
-#define AXP_REG_V0	0
-#define AXP_REG_T0	1
-#define AXP_REG_T1	2
-#define AXP_REG_T2	3
-#define AXP_REG_T3	4
-#define AXP_REG_T4	5
-#define AXP_REG_T5	6
-#define AXP_REG_T6	7
-#define AXP_REG_T7	8
-#define AXP_REG_S0	9
-#define AXP_REG_S1	10
-#define AXP_REG_S2	11
-#define AXP_REG_S3	12
-#define AXP_REG_S4	13
-#define AXP_REG_S5	14
-#define AXP_REG_FP	15
-#define AXP_REG_A0	16
-#define AXP_REG_A1	17
-#define AXP_REG_A2	18
-#define AXP_REG_A3	19
-#define AXP_REG_A4	20
-#define AXP_REG_A5	21
-#define AXP_REG_T8	22
-#define AXP_REG_T9	23
-#define AXP_REG_T10	24
-#define AXP_REG_T11	25
-#define AXP_REG_RA	26
-#define AXP_REG_PV	27
-#define AXP_REG_T12	27
-#define AXP_REG_AT	28
-#define AXP_REG_GP	29
-#define AXP_REG_SP	30
-#define AXP_REG_ZERO	31
+#define SW_REG_V0	0
+#define SW_REG_T0	1
+#define SW_REG_T1	2
+#define SW_REG_T2	3
+#define SW_REG_T3	4
+#define SW_REG_T4	5
+#define SW_REG_T5	6
+#define SW_REG_T6	7
+#define SW_REG_T7	8
+#define SW_REG_S0	9
+#define SW_REG_S1	10
+#define SW_REG_S2	11
+#define SW_REG_S3	12
+#define SW_REG_S4	13
+#define SW_REG_S5	14
+#define SW_REG_FP	15
+#define SW_REG_A0	16
+#define SW_REG_A1	17
+#define SW_REG_A2	18
+#define SW_REG_A3	19
+#define SW_REG_A4	20
+#define SW_REG_A5	21
+#define SW_REG_T8	22
+#define SW_REG_T9	23
+#define SW_REG_T10	24
+#define SW_REG_T11	25
+#define SW_REG_RA	26
+#define SW_REG_PV	27
+#define SW_REG_T12	27
+#define SW_REG_AT	28
+#define SW_REG_GP	29
+#define SW_REG_SP	30
+#define SW_REG_ZERO	31
 
 enum bfd_reloc_code_real {
     BFD_RELOC_23_PCREL_S2,
-    BFD_RELOC_SW_64_HINT
+    BFD_RELOC_SW64_HINT
 };
 
 static unsigned insert_rba(unsigned insn, int value ATTRIBUTE_UNUSED,
@@ -357,23 +357,9 @@ static int extract_jhint(unsigned insn, int *invalid ATTRIBUTE_UNUSED)
     return 4 * (((insn & 0xFFFF) ^ 0x8000) - 0x8000);
 }
 
-/* The hint field of an EV6 HW_JMP/JSR insn. */
-
-static unsigned insert_sw4hwjhint(unsigned insn, int value, const char **errmsg)
-{
-    if (errmsg != (const char **)NULL && (value & 3))
-        *errmsg = "jump hint unaligned";
-    return insn | ((value / 4) & 0x1FFF);
-}
-
-static int extract_sw4hwjhint(unsigned insn, int *invalid ATTRIBUTE_UNUSED)
-{
-    return 4 * (((insn & 0x1FFF) ^ 0x1000) - 0x1000);
-}
-
 /* The operands table. */
 
-const struct sw_64_operand sw_64_operands[] = {
+const struct sw64_operand sw64_operands[] = {
     /* The fields are bits, shift, insert, extract, flags */
     /* The zero index is used to indicate end-of-list */
 #define UNUSED		0
@@ -381,138 +367,132 @@ const struct sw_64_operand sw_64_operands[] = {
 
     /* The plain integer register fields. */
 #define RA		(UNUSED + 1)
-    { 5, 21, 0, AXP_OPERAND_IR, 0, 0 },
+    { 5, 21, 0, SW_OPERAND_IR, 0, 0 },
 #define RB		(RA + 1)
-    { 5, 16, 0, AXP_OPERAND_IR, 0, 0 },
+    { 5, 16, 0, SW_OPERAND_IR, 0, 0 },
 #define RC		(RB + 1)
-    { 5, 0, 0, AXP_OPERAND_IR, 0, 0 },
+    { 5, 0, 0, SW_OPERAND_IR, 0, 0 },
 
     /* The plain fp register fields. */
 #define FA		(RC + 1)
-    { 5, 21, 0, AXP_OPERAND_FPR, 0, 0 },
+    { 5, 21, 0, SW_OPERAND_FPR, 0, 0 },
 #define FB		(FA + 1)
-    { 5, 16, 0, AXP_OPERAND_FPR, 0, 0 },
+    { 5, 16, 0, SW_OPERAND_FPR, 0, 0 },
 #define FC		(FB + 1)
-    { 5, 0, 0, AXP_OPERAND_FPR, 0, 0 },
+    { 5, 0, 0, SW_OPERAND_FPR, 0, 0 },
 
     /* The integer registers when they are ZERO. */
 #define ZA		(FC + 1)
-    { 5, 21, 0, AXP_OPERAND_FAKE, insert_za, extract_za },
+    { 5, 21, 0, SW_OPERAND_FAKE, insert_za, extract_za },
 #define ZB		(ZA + 1)
-    { 5, 16, 0, AXP_OPERAND_FAKE, insert_zb, extract_zb },
+    { 5, 16, 0, SW_OPERAND_FAKE, insert_zb, extract_zb },
 #define ZC		(ZB + 1)
-    { 5, 0, 0, AXP_OPERAND_FAKE, insert_zc, extract_zc },
+    { 5, 0, 0, SW_OPERAND_FAKE, insert_zc, extract_zc },
 
     /* The RB field when it needs parentheses. */
 #define PRB		(ZC + 1)
-    { 5, 16, 0, AXP_OPERAND_IR | AXP_OPERAND_PARENS, 0, 0 },
+    { 5, 16, 0, SW_OPERAND_IR | SW_OPERAND_PARENS, 0, 0 },
 
     /* The RB field when it needs parentheses _and_ a preceding comma. */
 #define CPRB		(PRB + 1)
     { 5, 16, 0,
-        AXP_OPERAND_IR | AXP_OPERAND_PARENS | AXP_OPERAND_COMMA, 0, 0 },
+        SW_OPERAND_IR | SW_OPERAND_PARENS | SW_OPERAND_COMMA, 0, 0 },
 
     /* The RB field when it must be the same as the RA field. */
 #define RBA		(CPRB + 1)
-    { 5, 16, 0, AXP_OPERAND_FAKE, insert_rba, extract_rba },
+    { 5, 16, 0, SW_OPERAND_FAKE, insert_rba, extract_rba },
 
     /* The RC field when it must be the same as the RB field. */
 #define RCA		(RBA + 1)
-    { 5, 0, 0, AXP_OPERAND_FAKE, insert_rca, extract_rca },
+    { 5, 0, 0, SW_OPERAND_FAKE, insert_rca, extract_rca },
 
 #define RDC            (RCA + 1)
-    { 5, 0, 0, AXP_OPERAND_FAKE, insert_rdc, extract_rdc },
+    { 5, 0, 0, SW_OPERAND_FAKE, insert_rdc, extract_rdc },
 
     /* The RC field when it can *default* to RA. */
 #define DRC1		(RDC + 1)
     { 5, 0, 0,
-        AXP_OPERAND_IR | AXP_OPERAND_DEFAULT_FIRST, 0, 0 },
+        SW_OPERAND_IR | SW_OPERAND_DEFAULT_FIRST, 0, 0 },
 
     /* The RC field when it can *default* to RB. */
 #define DRC2		(DRC1 + 1)
     { 5, 0, 0,
-        AXP_OPERAND_IR | AXP_OPERAND_DEFAULT_SECOND, 0, 0 },
+        SW_OPERAND_IR | SW_OPERAND_DEFAULT_SECOND, 0, 0 },
 
     /* The FC field when it can *default* to RA. */
 #define DFC1		(DRC2 + 1)
     { 5, 0, 0,
-        AXP_OPERAND_FPR | AXP_OPERAND_DEFAULT_FIRST, 0, 0 },
+        SW_OPERAND_FPR | SW_OPERAND_DEFAULT_FIRST, 0, 0 },
 
     /* The FC field when it can *default* to RB. */
 #define DFC2		(DFC1 + 1)
     { 5, 0, 0,
-        AXP_OPERAND_FPR | AXP_OPERAND_DEFAULT_SECOND, 0, 0 },
+        SW_OPERAND_FPR | SW_OPERAND_DEFAULT_SECOND, 0, 0 },
 
     /* The unsigned 8-bit literal of Operate format insns. */
 #define LIT		(DFC2 + 1)
-    { 8, 13, -LIT, AXP_OPERAND_UNSIGNED, 0, 0 },
+    { 8, 13, -LIT, SW_OPERAND_UNSIGNED, 0, 0 },
 
     /* The signed 16-bit displacement of Memory format insns.  From here
        we can't tell what relocation should be used, so don't use a default. */
 #define MDISP		(LIT + 1)
-    { 16, 0, -MDISP, AXP_OPERAND_SIGNED, 0, 0 },
+    { 16, 0, -MDISP, SW_OPERAND_SIGNED, 0, 0 },
 
     /* The signed "23-bit" aligned displacement of Branch format insns. */
 #define BDISP		(MDISP + 1)
     { 21, 0, BFD_RELOC_23_PCREL_S2,
-        AXP_OPERAND_RELATIVE, insert_bdisp, extract_bdisp },
+        SW_OPERAND_RELATIVE, insert_bdisp, extract_bdisp },
 
-    /* The 26-bit PALcode function for sys_call and sys_call / b. */
+    /* The 26-bit hmcode function for sys_call and sys_call / b. */
 #define PALFN		(BDISP + 1)
-    { 25, 0, -PALFN, AXP_OPERAND_UNSIGNED, 0, 0 },
+    { 25, 0, -PALFN, SW_OPERAND_UNSIGNED, 0, 0 },
 
     /* sw jsr/ret insntructions has no function bits. */
     /* The optional signed "16-bit" aligned displacement of the JMP/JSR hint. */
 #define JMPHINT		(PALFN + 1)
-    { 16, 0, BFD_RELOC_SW_64_HINT,
-        AXP_OPERAND_RELATIVE | AXP_OPERAND_DEFAULT_ZERO | AXP_OPERAND_NOOVERFLOW,
+    { 16, 0, BFD_RELOC_SW64_HINT,
+        SW_OPERAND_RELATIVE | SW_OPERAND_DEFAULT_ZERO | SW_OPERAND_NOOVERFLOW,
         insert_jhint, extract_jhint },
 
     /* The optional hint to RET/JSR_COROUTINE. */
 #define RETHINT		(JMPHINT + 1)
     { 16, 0, -RETHINT,
-        AXP_OPERAND_UNSIGNED | AXP_OPERAND_DEFAULT_ZERO, 0, 0 },
+        SW_OPERAND_UNSIGNED | SW_OPERAND_DEFAULT_ZERO, 0, 0 },
 
-    /* The 12-bit displacement for the ev[46] hw_{ld,st} (pal1b/pal1f) insns. */
+    /* The 12-bit displacement for the core3 hw_{ld,st} (pal1b/pal1f) insns. */
 #define HWDISP		(RETHINT + 1)
-    { 12, 0, -HWDISP, AXP_OPERAND_SIGNED, 0, 0 },
+    { 12, 0, -HWDISP, SW_OPERAND_SIGNED, 0, 0 },
 
-    /* The 16-bit combined index/scoreboard mask for the ev6
+    /* The 16-bit combined index/scoreboard mask for the core3
        hw_m[ft]pr (pal19/pal1d) insns. */
 #define HWINDEX		(HWDISP + 1)
-    { 16, 0, -HWINDEX, AXP_OPERAND_UNSIGNED, 0, 0 },
-
-    /* The 13-bit branch hint for the ev6 hw_jmp/jsr (pal1e) insn. */
-#define HWJMPHINT	(HWINDEX + 1)
-    { 8, 0, -HWJMPHINT,
-        AXP_OPERAND_RELATIVE | AXP_OPERAND_DEFAULT_ZERO | AXP_OPERAND_NOOVERFLOW,
-        insert_sw4hwjhint, extract_sw4hwjhint },
+    { 16, 0, -HWINDEX, SW_OPERAND_UNSIGNED, 0, 0 },
 
     /* for the third operand of ternary operands integer insn. */
 #define R3              (HWJMPHINT + 1)
-    { 5, 5, 0, AXP_OPERAND_IR, 0, 0 },
+    { 5, 5, 0, SW_OPERAND_IR, 0, 0 },
     /* The plain fp register fields */
 #define F3              (R3 + 1)
-    { 5, 5, 0, AXP_OPERAND_FPR, 0, 0 },
+    { 5, 5, 0, SW_OPERAND_FPR, 0, 0 },
     /* sw simd settle instruction lit */
 #define FMALIT          (F3 + 1)
-    { 5,  5, -FMALIT, AXP_OPERAND_UNSIGNED, 0, 0 },    //V1.1
+    { 5,  5, -FMALIT, SW_OPERAND_UNSIGNED, 0, 0 },    //V1.1
 #define LMDISP          (FMALIT + 1)
-    { 15, 0, -LMDISP, AXP_OPERAND_UNSIGNED, 0, 0 },
+    { 15, 0, -LMDISP, SW_OPERAND_UNSIGNED, 0, 0 },
 #define RPIINDEX        (LMDISP + 1)
-    { 8, 0, -RPIINDEX, AXP_OPERAND_UNSIGNED, 0, 0 },
+    { 8, 0, -RPIINDEX, SW_OPERAND_UNSIGNED, 0, 0 },
 #define ATMDISP         (RPIINDEX + 1)
-    { 12, 0, -ATMDISP, AXP_OPERAND_SIGNED, 0, 0 },
+    { 12, 0, -ATMDISP, SW_OPERAND_SIGNED, 0, 0 },
 #define DISP13          (ATMDISP + 1)
-    { 13, 13, -DISP13, AXP_OPERAND_SIGNED, 0, 0},
+    { 13, 13, -DISP13, SW_OPERAND_SIGNED, 0, 0},
 #define BDISP26         (DISP13 + 1)
     { 26, 0, 222,
-        AXP_OPERAND_RELATIVE, insert_bdisp26, extract_bdisp26 },
+        SW_OPERAND_RELATIVE, insert_bdisp26, extract_bdisp26 },
 #define DPFTH           (BDISP26  + 1)
-    { 5, 21, -DPFTH, AXP_OPERAND_UNSIGNED, 0, 0}
+    { 5, 21, -DPFTH, SW_OPERAND_UNSIGNED, 0, 0}
 };
 
-const unsigned sw_64_num_operands = sizeof(sw_64_operands) / sizeof(*sw_64_operands);
+const unsigned sw64_num_operands = sizeof(sw64_operands) / sizeof(*sw64_operands);
 
 /* Macros used to form opcodes. */
 
@@ -600,8 +580,8 @@ const unsigned sw_64_num_operands = sizeof(sw_64_operands) / sizeof(*sw_64_opera
 #define LOGX(oo,ff)     LOGX_(oo,ff), LOGX_MASK
 
 /* Abbreviations for instruction subsets. */
-#define BASE            AXP_OPCODE_BASE
-#define CORE3           AXP_OPCODE_CORE3
+#define BASE            SW_OPCODE_BASE
+#define CORE3           SW_OPCODE_CORE3
 
 /* Common combinations of arguments. */
 #define ARG_NONE        { 0 }
@@ -656,7 +636,7 @@ const unsigned sw_64_num_operands = sizeof(sw_64_operands) / sizeof(*sw_64_opera
    Otherwise, it is sorted by major opcode and minor function code.
    */
 
-const struct sw_64_opcode sw_64_opcodes[] = {
+const struct sw64_opcode sw64_opcodes[] = {
     { "sys_call/b",     PCD(0x00,0x00), BASE, ARG_PCD },
     { "sys_call",       PCD(0x00,0x01), BASE, ARG_PCD },
 
@@ -1054,7 +1034,7 @@ const struct sw_64_opcode sw_64_opcodes[] = {
     { "ldih",           MEM(0x3F), BASE, ARG_MEM },
 };
 
-const unsigned sw_64_num_opcodes = sizeof(sw_64_opcodes) / sizeof(*sw_64_opcodes);
+const unsigned sw64_num_opcodes = sizeof(sw64_opcodes) / sizeof(*sw64_opcodes);
 
 /* OSF register names. */
 
@@ -1082,27 +1062,27 @@ static const char * const vms_regnames[64] = {
     "F24", "F25", "F26", "F27", "F28", "F29", "F30", "FZ"
 };
 
-int print_insn_sw_64(bfd_vma memaddr, struct disassemble_info *info)
+int print_insn_sw64(bfd_vma memaddr, struct disassemble_info *info)
 {
-    static const struct sw_64_opcode *opcode_index[AXP_NOPS + 1];
+    static const struct sw64_opcode *opcode_index[SW_NOPS + 1];
     const char * const * regnames;
-    const struct sw_64_opcode *opcode, *opcode_end;
+    const struct sw64_opcode *opcode, *opcode_end;
     const unsigned char *opindex;
     unsigned insn, op, isa_mask;
     int need_comma;
 
     /* Initialize the majorop table the first time through */
     if (!opcode_index[0]) {
-        opcode = sw_64_opcodes;
-        opcode_end = opcode + sw_64_num_opcodes;
+        opcode = sw64_opcodes;
+        opcode_end = opcode + sw64_num_opcodes;
 
-        for (op = 0; op < AXP_NOPS; ++op) {
+        for (op = 0; op < SW_NOPS; ++op) {
             opcode_index[op] = opcode;
-            if ((AXP_LITOP (opcode->opcode) != 0x10) && (AXP_LITOP (opcode->opcode) != 0x11)) {
-                while (opcode < opcode_end && op == AXP_OP (opcode->opcode))
+            if ((SW_LITOP (opcode->opcode) != 0x10) && (SW_LITOP (opcode->opcode) != 0x11)) {
+                while (opcode < opcode_end && op == SW_OP (opcode->opcode))
                     ++opcode;
             } else {
-                while (opcode < opcode_end && op == AXP_LITOP (opcode->opcode))
+                while (opcode < opcode_end && op == SW_LITOP (opcode->opcode))
                     ++opcode;
             }
         }
@@ -1113,10 +1093,10 @@ int print_insn_sw_64(bfd_vma memaddr, struct disassemble_info *info)
         regnames = vms_regnames;
     else
         regnames = osf_regnames;
-    isa_mask = AXP_OPCODE_NOPAL;
+    isa_mask = SW_OPCODE_NOPAL;
     switch (info->mach) {
-        case bfd_mach_sw_64_core3:
-            isa_mask |= AXP_OPCODE_BASE | AXP_OPCODE_CORE3;
+        case bfd_mach_sw64_core3:
+            isa_mask |= SW_OPCODE_BASE | SW_OPCODE_CORE3;
             break;
     }
 
@@ -1132,12 +1112,12 @@ int print_insn_sw_64(bfd_vma memaddr, struct disassemble_info *info)
     }
 
     /* Get the major opcode of the instruction. */
-    if ((AXP_LITOP (insn) == 0x10) || (AXP_LITOP (insn) == 0x11))
-        op = AXP_LITOP (insn);
-    else if ((AXP_OP(insn) & 0x3C) == 0x14 )
+    if ((SW_LITOP (insn) == 0x10) || (SW_LITOP (insn) == 0x11))
+        op = SW_LITOP (insn);
+    else if ((SW_OP(insn) & 0x3C) == 0x14 )
         op = 0x14;
     else
-        op = AXP_OP (insn);
+        op = SW_OP (insn);
 
     /* Find the first match in the opcode table. */
     opcode_end = opcode_index[op + 1];
@@ -1154,7 +1134,7 @@ int print_insn_sw_64(bfd_vma memaddr, struct disassemble_info *info)
         {
             int invalid = 0;
             for (opindex = opcode->operands; *opindex != 0; opindex++) {
-                const struct sw_64_operand *operand = sw_64_operands + *opindex;
+                const struct sw64_operand *operand = sw64_operands + *opindex;
                 if (operand->extract)
                     (*operand->extract) (insn, &invalid);
             }
@@ -1185,7 +1165,7 @@ found:
     {
         unsigned int truth;
         char tr[4];
-        truth=(AXP_OP(insn) & 3) << 6;
+        truth = (SW_OP(insn) & 3) << 6;
         truth = truth | ((insn &  0xFC00) >> 10);
         sprintf(tr,"%x",truth);
         (*info->fprintf_func) (info->stream, "%s", tr);
@@ -1196,13 +1176,13 @@ found:
     /* Now extract and print the operands. */
     need_comma = 0;
     for (opindex = opcode->operands; *opindex != 0; opindex++) {
-        const struct sw_64_operand *operand = sw_64_operands + *opindex;
+        const struct sw64_operand *operand = sw64_operands + *opindex;
         int value;
 
         /* Operands that are marked FAKE are simply ignored.  We
            already made sure that the extract function considered
            the instruction to be valid. */
-        if ((operand->flags & AXP_OPERAND_FAKE) != 0)
+        if ((operand->flags & SW_OPERAND_FAKE) != 0)
             continue;
 
         /* Extract the value from the instruction. */
@@ -1210,33 +1190,33 @@ found:
             value = (*operand->extract) (insn, (int *) NULL);
         else {
             value = (insn >> operand->shift) & ((1 << operand->bits) - 1);
-            if (operand->flags & AXP_OPERAND_SIGNED) {
+            if (operand->flags & SW_OPERAND_SIGNED) {
                 int signbit = 1 << (operand->bits - 1);
                 value = (value ^ signbit) - signbit;
             }
         }
 
         if (need_comma &&
-                ((operand->flags & (AXP_OPERAND_PARENS | AXP_OPERAND_COMMA))
-                 != AXP_OPERAND_PARENS)) {
+                ((operand->flags & (SW_OPERAND_PARENS | SW_OPERAND_COMMA))
+                 != SW_OPERAND_PARENS)) {
             (*info->fprintf_func) (info->stream, ",");
         }
-        if (operand->flags & AXP_OPERAND_PARENS)
+        if (operand->flags & SW_OPERAND_PARENS)
             (*info->fprintf_func) (info->stream, "(");
 
         /* Print the operand as directed by the flags. */
-        if (operand->flags & AXP_OPERAND_IR)
+        if (operand->flags & SW_OPERAND_IR)
             (*info->fprintf_func) (info->stream, "%s", regnames[value]);
-        else if (operand->flags & AXP_OPERAND_FPR)
+        else if (operand->flags & SW_OPERAND_FPR)
             (*info->fprintf_func) (info->stream, "%s", regnames[value + 32]);
-        else if (operand->flags & AXP_OPERAND_RELATIVE)
+        else if (operand->flags & SW_OPERAND_RELATIVE)
             (*info->print_address_func) (memaddr + 4 + value, info);
-        else if (operand->flags & AXP_OPERAND_SIGNED)
+        else if (operand->flags & SW_OPERAND_SIGNED)
             (*info->fprintf_func) (info->stream, "%d", value);
         else
             (*info->fprintf_func) (info->stream, "%#x", value);
 
-        if (operand->flags & AXP_OPERAND_PARENS)
+        if (operand->flags & SW_OPERAND_PARENS)
             (*info->fprintf_func) (info->stream, ")");
         need_comma = 1;
     }

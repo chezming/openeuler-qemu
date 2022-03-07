@@ -89,7 +89,7 @@ void cpu_loop(CPUSW64State *env)
         }
         process_pending_signals (env);
 
-        /* Most of the traps imply a transition through PALcode, which
+        /* Most of the traps imply a transition through HMcode, which
            implies an REI instruction has been executed.  Which means
            that RX and LOCK_ADDR should be cleared.  But there are a
            few exceptions for traps internal to QEMU.  */
