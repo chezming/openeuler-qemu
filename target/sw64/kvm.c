@@ -1,7 +1,7 @@
 /*
  * SW64 implementation of KVM hooks
  *
- * Copyright Christoffer Dall 2009-2010
+ * Copyright (c) 2018 Lin Hainan
  *
  * This work is licensed under the terms of the GNU GPL, version 2 or later.
  * See the COPYING file in the top-level directory.

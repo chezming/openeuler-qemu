@@ -368,10 +368,7 @@ static const struct SysemuCPUOps sw64_sysemu_ops = {
 #endif
 
 #include "hw/core/tcg-cpu-ops.h"
-/*
- * NB: cannot be const, as some elements are changed for specific
- * mips hardware (see hw/mips/jazz.c).
- */
+
 static const struct TCGCPUOps sw64_tcg_ops = {
 #ifdef CONFIG_TCG
     .initialize = sw64_translate_init,

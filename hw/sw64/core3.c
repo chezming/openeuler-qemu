@@ -1,5 +1,9 @@
 /*
  * QEMU CORE3 hardware system emulator.
+ *
+ * Copyright (c) 2018 Li Hainan
+ *
+ * This work is licensed under the GNU GPL license version 2 or later.
  */
 
 #include "qemu/osdep.h"

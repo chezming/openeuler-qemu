@@ -1,7 +1,7 @@
 /*
  * QEMU KVM support -- SW64 specific functions.
  *
- * Copyright (c) 2018 oskern
+ * Copyright (c) 2018 Lin Hainan
  *
  * This work is licensed under the terms of the GNU GPL, version 2 or later.
  * See the COPYING file in the top-level directory.

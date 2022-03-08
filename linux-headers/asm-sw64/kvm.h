@@ -97,8 +97,7 @@ struct kvm_fpu {
 };
 
 /*
- * KVM MIPS specific structures and definitions
- *
+ * KVM SW_64 specific structures and definitions
  */
 struct kvm_debug_exit_arch {
 };
@@ -113,12 +112,6 @@ struct kvm_sync_regs {
 
 /* dummy definition */
 struct kvm_sregs {
-};
-
-struct kvm_mips_interrupt {
-	/* in */
-	__u32 cpu;
-	__u32 irq;
 };
 
 #define KVM_SW64_VCPU_INIT    _IO(KVMIO, 0xba)
