@@ -65,7 +65,7 @@ extern const unsigned sw64_num_opcodes;
 #define SW_OPCODE_CORE3	0x0002  /* Core3 private insns. */
 #define SW_LITOP(i)		(((i) >> 26) & 0x3D)
 
-#define SW_OPCODE_NOPAL        (~(SW_OPCODE_BASE|SW_OPCODE_CORE3))
+#define SW_OPCODE_NOHM        (~(SW_OPCODE_BASE|SW_OPCODE_CORE3))
 
 /* A macro to extract the major opcode from an instruction. */
 #define SW_OP(i)               (((i) >> 26) & 0x3F)
@@ -444,12 +444,12 @@ const struct sw64_operand sw64_operands[] = {
         SW_OPERAND_RELATIVE, insert_bdisp, extract_bdisp },
 
     /* The 26-bit hmcode function for sys_call and sys_call / b. */
-#define PALFN		(BDISP + 1)
-    { 25, 0, -PALFN, SW_OPERAND_UNSIGNED, 0, 0 },
+#define HMFN		(BDISP + 1)
+    { 25, 0, -HMFN, SW_OPERAND_UNSIGNED, 0, 0 },
 
     /* sw jsr/ret insntructions has no function bits. */
     /* The optional signed "16-bit" aligned displacement of the JMP/JSR hint. */
-#define JMPHINT		(PALFN + 1)
+#define JMPHINT		(HMFN + 1)
     { 16, 0, BFD_RELOC_SW64_HINT,
         SW_OPERAND_RELATIVE | SW_OPERAND_DEFAULT_ZERO | SW_OPERAND_NOOVERFLOW,
         insert_jhint, extract_jhint },
@@ -598,7 +598,7 @@ const unsigned sw64_num_operands = sizeof(sw64_operands) / sizeof(*sw64_operands
 #define ARG_OPRL	{ RA, LIT, DRC1 }
 #define ARG_OPRZ1	{ ZA, RB, DRC1 }
 #define ARG_OPRLZ1	{ ZA, LIT, RC }
-#define ARG_PCD		{ PALFN }
+#define ARG_PCD		{ HMFN }
 #define ARG_HWMEM       { RA, HWDISP, PRB }
 #define ARG_FPL         { FA,LIT, DFC1 }
 #define ARG_FMA         { FA,FB,F3, DFC1 }
@@ -1093,7 +1093,7 @@ int print_insn_sw64(bfd_vma memaddr, struct disassemble_info *info)
         regnames = vms_regnames;
     else
         regnames = osf_regnames;
-    isa_mask = SW_OPCODE_NOPAL;
+    isa_mask = SW_OPCODE_NOHM;
     switch (info->mach) {
         case bfd_mach_sw64_core3:
             isa_mask |= SW_OPCODE_BASE | SW_OPCODE_CORE3;

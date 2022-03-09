@@ -42,7 +42,7 @@ struct kvm_regs {
 	unsigned long fpcr;
 
 	unsigned long fp[124];
-	/* These are saved by PAL-code: */
+	/* These are saved by hmcode: */
 	unsigned long ps;
 	unsigned long pc;
 	unsigned long gp;

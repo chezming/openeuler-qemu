@@ -446,7 +446,6 @@ void core3_board_init(SW64CPU *cpus[MAX_CPUS], MemoryRegion *ram)
     b = pci_register_root_bus(dev, "pcie.0", swboard_set_irq, swboard_map_irq, bs,
                          mem_ep, io_ep, 0, 537, TYPE_PCIE_BUS);
     phb->bus = b;
-//    qdev_init_nofail(dev);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
     pci_bus_set_route_irq_fn(b, sw_route_intx_pin_to_irq);
     memory_region_init_io(conf_piu0, OBJECT(bs), &core3_pci_config_ops, b,

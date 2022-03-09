@@ -227,7 +227,6 @@ uint64_t helper_fcvtsd(CPUSW64State *env, uint64_t a)
 
     fa = s_to_float32(a);
     fr = float32_to_float64(fa, &FP_STATUS);
-    /* env->error_code = soft_to_fpcr_exc(env); */
 
     return fr;
 }
@@ -237,7 +236,6 @@ uint64_t helper_fcvtds(CPUSW64State *env, uint64_t a)
     float32 fa;
 
     fa = float64_to_float32((float64)a, &FP_STATUS);
-    /* env->error_code = soft_to_fpcr_exc(env); */
 
     return float32_to_s(fa);
 }
@@ -617,22 +615,6 @@ void helper_setfpcrx(CPUSW64State *env, uint64_t val)
     }
 }
 #ifndef CONFIG_USER_ONLY
-/*
-static uint64_t soft_to_fpcr_exc(uint64_t exc)
-{
-    uint64_t ret = 0;
-
-    if (unlikely(exc)) {
-        ret |= CONVERT_BIT(exc, float_flag_invalid, FPCR_GET(INV0));
-        ret |= CONVERT_BIT(exc, float_flag_divbyzero, FPCR_GET(DZE0));
-        ret |= CONVERT_BIT(exc, float_flag_overflow, FPCR_GET(OVF0));
-        ret |= CONVERT_BIT(exc, float_flag_underflow, FPCR_GET(UNF0));
-        ret |= CONVERT_BIT(exc, float_flag_inexact, FPCR_GET(INE0));
-    }
-
-    return ret;
-}
-*/
 static uint32_t soft_to_exc_type(uint64_t exc)
 {
     uint32_t ret = 0;
@@ -643,7 +625,6 @@ static uint32_t soft_to_exc_type(uint64_t exc)
         ret |= CONVERT_BIT(exc, float_flag_overflow, EXC_M_OVF);
         ret |= CONVERT_BIT(exc, float_flag_underflow, EXC_M_UNF);
         ret |= CONVERT_BIT(exc, float_flag_inexact, EXC_M_INE);
-        // ret |= CONVERT_BIT(exc, float_flag_input_denormal, EXC_M_DNO);
     }
 
     return ret;
@@ -674,14 +655,8 @@ void helper_ieee_input(CPUSW64State *env, uint64_t val)
     uint32_t exp = (uint32_t)(val >> 52) & 0x7ff;
     uint64_t frac = val & 0xfffffffffffffull;
 
-    if (exp == 0) {
-        /* Denormals without /S raise an exception.  */
-        if (frac != 0) {
-            /* arith_excp(env, GETPC(), EXC_M_INV, 0); */
-        }
-    } else if (exp == 0x7ff) {
+    if (exp == 0x7ff) {
         /* Infinity or NaN.  */
-        /* arith_excp(env, GETPC(), EXC_M_INV, 0); */
         uint32_t exc_type = EXC_M_INV;
 
         if (exc_type) {
@@ -697,7 +672,6 @@ void helper_ieee_input_s(CPUSW64State *env, uint64_t val)
 {
     if (unlikely(2 * val - 1 < 0x1fffffffffffffull) &&
         !env->fp_status.flush_inputs_to_zero) {
-        /* arith_excp(env, GETPC(), EXC_M_INV | EXC_M_SWC, 0); */
     }
 }
 

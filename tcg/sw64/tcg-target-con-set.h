@@ -34,8 +34,6 @@ C_O1_I2(w, w, wZ)
 C_O1_I3(w, w, w, w)
 C_O1_I4(r, r, rA, rZ, rZ)
 C_O2_I4(r, r, rZ, rZ, rA, rMZ)
-
-//gaoqing 
 C_O1_I4(r, r, rU, rZ, rZ)
 C_O0_I2(r, rU)
 C_O1_I2(r, r, rU)

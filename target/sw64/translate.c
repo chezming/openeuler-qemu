@@ -373,7 +373,6 @@ static inline void gen_load_mem(
 
     va = (fp ? cpu_fr[ra] : load_gir(ctx, ra));
     tcg_gen_qemu_load(va, addr, ctx->mem_idx);
-    //gen_helper_trace_mem(cpu_env, addr, va);
 
     tcg_temp_free(tmp);
 }
@@ -896,7 +895,6 @@ static inline void gen_load_mem_simd(
 
     tcg_gen_qemu_load(ra, addr, ctx->mem_idx);
     // FIXME: for debug
-    //gen_helper_trace_mem(cpu_env, addr, va);
 
     tcg_temp_free(tmp);
 }
@@ -920,7 +918,6 @@ static inline void gen_store_mem_simd(
         tcg_gen_andi_i64(addr, addr, mask);
     }
     // FIXME: for debug
-    //gen_helper_trace_mem(cpu_env, addr, addr);
     tcg_gen_qemu_store(ra, addr, ctx->mem_idx);
 
     tcg_temp_free(tmp);
@@ -2345,7 +2342,7 @@ DisasJumpType translate_one(DisasContextBase *dcbase, uint32_t insn,
             if ((disp16 & 0xFF00) == 0xFF00) {
                 /* PRI_WCSR */
                 va = load_gir(ctx, ra);
-                write_csr(disp16 & 0xff, va ,ctx->env);
+                write_csr(disp16 & 0xff, va, ctx->env);
                 break;
             }
             goto do_invalid;
@@ -3742,7 +3739,7 @@ static void sw64_tr_tb_stop(DisasContextBase* dcbase, CPUState* cpu) {
             if (use_goto_tb(ctx, ctx->base.pc_next)) {
                 tcg_gen_goto_tb(0);
                 tcg_gen_movi_i64(cpu_pc, ctx->base.pc_next);
-                tcg_gen_exit_tb(ctx->base.tb,0);
+                tcg_gen_exit_tb(ctx->base.tb, 0);
             }
         /* FALLTHRU */
         case DISAS_PC_STALE:
@@ -3757,10 +3754,9 @@ static void sw64_tr_tb_stop(DisasContextBase* dcbase, CPUState* cpu) {
         case DISAS_PC_UPDATED_NOCHAIN:
             if (ctx->base.singlestep_enabled) {
                 /* FIXME: for gdb*/
-                //gen_excp_1(EXCP_DEBUG, 0);
                 cpu_loop_exit(cpu);
             } else {
-                tcg_gen_exit_tb(NULL,0);
+                tcg_gen_exit_tb(NULL, 0);
             }
             break;
         default:

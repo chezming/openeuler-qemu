@@ -281,7 +281,7 @@ static bool sw64_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
     SW64CPU *cpu = SW64_CPU(cs);
     CPUSW64State *env = &cpu->env;
     int idx = -1;
-    /* We never take interrupts while in PALmode.  */
+    /* We never take interrupts while in Hardmode.  */
     if (env->flags & ENV_FLAG_HM_MODE)
         return false;
 

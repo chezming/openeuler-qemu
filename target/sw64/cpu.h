@@ -46,8 +46,8 @@
 #define MMU_KERNEL_IDX 2
 #define MMU_USER_IDX 3
 
-/* FIXME:Bits 4 and 5 are the mmu mode.  The VMS PALcode uses all 4 modes;
-   The Unix PALcode only uses bit 4.  */
+/* FIXME:Bits 4 and 5 are the mmu mode.  The VMS hmcode uses all 4 modes;
+   The Unix hmcode only uses bit 4.  */
 #define PS_USER_MODE 8u
 
 #define ENV_FLAG_HM_SHIFT 0

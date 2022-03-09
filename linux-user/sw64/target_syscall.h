@@ -95,8 +95,8 @@ struct target_pt_regs {
 #define SWCR_TRAP_ENABLE_UNF    (1UL<<4)    /* underflow */
 #define SWCR_TRAP_ENABLE_INE    (1UL<<5)    /* inexact */
 #define SWCR_TRAP_ENABLE_DNO    (1UL<<6)    /* denorm */
-#define SWCR_TRAP_ENABLE_MASK   (SWCR_TRAP_ENABLE_INV | SWCR_TRAP_ENABLE_DZE |\
-                 SWCR_TRAP_ENABLE_OVF | SWCR_TRAP_ENABLE_UNF |\
+#define SWCR_TRAP_ENABLE_MASK   (SWCR_TRAP_ENABLE_INV | SWCR_TRAP_ENABLE_DZE | \
+                 SWCR_TRAP_ENABLE_OVF | SWCR_TRAP_ENABLE_UNF | \
                  SWCR_TRAP_ENABLE_INE | SWCR_TRAP_ENABLE_DNO)
 
 /* Denorm and Underflow flushing */

@@ -131,7 +131,7 @@ static void core3_init(MachineState *machine)
     }
     g_free(hmcode_filename);
 
-    /* Start all cpus at the PALcode RESET entry point.  */
+    /* Start all cpus at the hmcode RESET entry point.  */
     for (i = 0; i < machine->smp.cpus; ++i) {
         cpus[i]->env.pc = hmcode_entry;
         cpus[i]->env.hm_entry = hmcode_entry;
@@ -144,7 +144,7 @@ static void core3_init(MachineState *machine)
     } else {
 	/* Load a kernel.  */
 	size = load_elf(kernel_filename, NULL, cpu_sw64_virt_to_phys, NULL,
-			&kernel_entry, &kernel_low, &kernel_high, NULL, 0, EM_SW64, 0,0);
+			&kernel_entry, &kernel_low, &kernel_high, NULL, 0, EM_SW64, 0, 0);
 	if (size < 0) {
 	    error_report("could not load kernel '%s'", kernel_filename);
 	    exit(1);

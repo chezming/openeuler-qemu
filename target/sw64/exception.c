@@ -55,7 +55,7 @@ void QEMU_NORETURN dynamic_excp(CPUSW64State *env, uintptr_t retaddr, int excp,
     env->error_code = error;
     if (retaddr) {
         /* FIXME: Not jump to another tb, but jump to next insn emu */
-        cpu_restore_state(cs, retaddr,true);
+        cpu_restore_state(cs, retaddr, true);
         /* Floating-point exceptions (our only users) point to the next PC.  */
         env->pc += 4;
     }

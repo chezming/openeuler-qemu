@@ -199,7 +199,6 @@ void setup_rt_frame(int sig, struct target_sigaction *ka,
         __put_user(INSN_LDI_R0 + TARGET_NR_rt_sigreturn,
                    &frame->retcode[1]);
         __put_user(INSN_CALLSYS, &frame->retcode[2]);
-        /* imb(); */
         r26 = frame_addr + offsetof(struct target_sigframe, retcode);
     }
 
