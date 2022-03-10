@@ -188,27 +188,6 @@ static uint64_t do_fcvtdl(CPUSW64State *env, uint64_t a, uint64_t roundmode)
     return ret;
 }
 
-/* TODO: */
-uint64_t helper_fris(CPUSW64State *env, uint64_t a, uint64_t roundmode)
-{
-    uint64_t ir;
-    float32 fr;
-
-    if (roundmode == 5)
-        roundmode = env->fpcr_round_mode;
-    ir = do_fcvtdl(env, a, roundmode);
-    fr = int64_to_float32(ir, &FP_STATUS);
-    return float32_to_s(fr);
-}
-
-/* TODO: */
-uint64_t helper_frid(CPUSW64State *env, uint64_t a, uint64_t roundmode)
-{
-    if (roundmode == 5)
-        roundmode = env->fpcr_round_mode;
-    return int64_to_float64(do_fcvtdl(env, a, roundmode), &FP_STATUS);
-}
-
 uint64_t helper_fcvtdl(CPUSW64State *env, uint64_t a, uint64_t roundmode)
 {
     return do_fcvtdl(env, a, roundmode);
@@ -245,7 +224,7 @@ uint64_t helper_fcvtwl(CPUSW64State *env, uint64_t a)
     int32_t ret;
     ret = (a >> 29) & 0x3fffffff;
     ret |= ((a >> 62) & 0x3) << 30;
-    return (uint64_t)(int64_t)ret; //int32_t  to int64_t as Sign-Extend
+    return (uint64_t)(int64_t)ret;
 }
 
 uint64_t helper_fcvtlw(CPUSW64State *env, uint64_t a)
@@ -262,13 +241,9 @@ uint64_t helper_fadds(CPUSW64State *env, uint64_t a, uint64_t b)
 
     fa = s_to_float32(a);
     fb = s_to_float32(b);
-#if 1
     fr = float32_add(fa, fb, &FP_STATUS);
 
     env->error_code = soft_to_errcode_exc(env);
-#else
-    *(float*)&fr = *(float*)&fb + *(float*)&fa;
-#endif
     return float32_to_s(fr);
 }
 
@@ -280,12 +255,8 @@ uint64_t helper_faddd(CPUSW64State *env, uint64_t a, uint64_t b)
 
     fa = (float64)a;
     fb = (float64)b;
-#if 1
     fr = float64_add(fa, fb, &FP_STATUS);
     env->error_code = soft_to_errcode_exc(env);
-#else
-    *(double*)&fr = *(double*)&fb + *(double*)&fa;
-#endif
     return (uint64_t)fr;
 }
 
@@ -295,12 +266,8 @@ uint64_t helper_fsubs(CPUSW64State *env, uint64_t a, uint64_t b)
 
     fa = s_to_float32(a);
     fb = s_to_float32(b);
-#if 1
     fr = float32_sub(fa, fb, &FP_STATUS);
     env->error_code = soft_to_errcode_exc(env);
-#else
-    *(float*)&fr = *(float*)&fa - *(float*)&fb;
-#endif
     return float32_to_s(fr);
 }
 
@@ -310,12 +277,8 @@ uint64_t helper_fsubd(CPUSW64State *env, uint64_t a, uint64_t b)
 
     fa = (float64)a;
     fb = (float64)b;
-#if 1
     fr = float64_sub(fa, fb, &FP_STATUS);
     env->error_code = soft_to_errcode_exc(env);
-#else
-    *(double*)&fr = *(double*)&fa - *(double*)&fb;
-#endif
     return (uint64_t)fr;
 }
 
@@ -325,12 +288,8 @@ uint64_t helper_fmuls(CPUSW64State *env, uint64_t a, uint64_t b)
 
     fa = s_to_float32(a);
     fb = s_to_float32(b);
-#if 1
     fr = float32_mul(fa, fb, &FP_STATUS);
     env->error_code = soft_to_errcode_exc(env);
-#else
-    *(float*)&fr = *(float*)&fa * *(float*)&fb;
-#endif
     return float32_to_s(fr);
 }
 
@@ -340,12 +299,8 @@ uint64_t helper_fmuld(CPUSW64State *env, uint64_t a, uint64_t b)
 
     fa = (float64)a;
     fb = (float64)b;
-#if 1
     fr = float64_mul(fa, fb, &FP_STATUS);
     env->error_code = soft_to_errcode_exc(env);
-#else
-    *(double*)&fr = *(double*)&fa * *(double*)&fb;
-#endif
     return (uint64_t)fr;
 }
 
@@ -355,12 +310,8 @@ uint64_t helper_fdivs(CPUSW64State *env, uint64_t a, uint64_t b)
 
     fa = s_to_float32(a);
     fb = s_to_float32(b);
-#if 1
     fr = float32_div(fa, fb, &FP_STATUS);
     env->error_code = soft_to_errcode_exc(env);
-#else
-    *(float*)&fr = *(float*)&fa / *(float*)&fb;
-#endif
     return float32_to_s(fr);
 }
 
@@ -370,13 +321,8 @@ uint64_t helper_fdivd(CPUSW64State *env, uint64_t a, uint64_t b)
 
     fa = (float64)a;
     fb = (float64)b;
-#if 1
     fr = float64_div(fa, fb, &FP_STATUS);
     env->error_code = soft_to_errcode_exc(env);
-#else
-    *(double*)&fr = *(double*)&fa / *(double*)&fb;
-#endif
-
     return (uint64_t)fr;
 }
 
@@ -386,12 +332,8 @@ uint64_t helper_frecs(CPUSW64State *env, uint64_t a)
 
     fa = s_to_float32(a);
     fb = int64_to_float32(1, &FP_STATUS);
-#if 1
     fr = float32_div(fb, fa, &FP_STATUS);
     env->error_code = soft_to_errcode_exc(env);
-#else
-    *(float*)&fr = *(float*)&fb / *(float*)&fa;
-#endif
     return float32_to_s(fr);
 }
 
@@ -401,28 +343,17 @@ uint64_t helper_frecd(CPUSW64State *env, uint64_t a)
 
     fa = (float64)a;
     fb = int64_to_float64(1, &FP_STATUS);
-#if 1
     fr = float64_div(fb, fa, &FP_STATUS);
     env->error_code = soft_to_errcode_exc(env);
-#else
-    *(double*)&fr = *(double*)&fb / *(double*)&fa;
-#endif
-
     return (uint64_t)fr;
 }
 
 uint64_t helper_fsqrts(CPUSW64State *env, uint64_t b)
 {
     float32 fb, fr;
-#if 1
     fb = s_to_float32(b);
     fr = float32_sqrt(fb, &FP_STATUS);
     env->error_code = soft_to_errcode_exc(env);
-#else
-#include <math.h>
-    *(double*)&fr = sqrt(*(double*)&b);
-#endif
-
     return float32_to_s(fr);
 }
 
@@ -430,14 +361,8 @@ uint64_t helper_fsqrt(CPUSW64State *env, uint64_t b)
 {
     float64 fr;
 
-#if 1
     fr = float64_sqrt(b, &FP_STATUS);
     env->error_code = soft_to_errcode_exc(env);
-#else
-#include <math.h>
-    *(double*)&fr = sqrt(*(double*)&b);
-#endif
-
     return (uint64_t)fr;
 }
 
@@ -597,8 +522,7 @@ void helper_store_fpcr(CPUSW64State *env, uint64_t val)
         (fpcr & FPCR_MASK(UNFD)) && (fpcr & FPCR_MASK(UNDZ));
     env->fp_status.flush_to_zero = env->fpcr_flush_to_zero;
 
-    /* FIXME: Now the DNZ flag does not work int C3A. */
-    //set_flush_inputs_to_zero((val & FPCR_MASK(DNZ)) != 0? 1 : 0, &FP_STATUS);
+    /* FIXME: Now the DNZ flag does not work int CORE3. */
 
     val &= ~0x3UL;
     val |= env->fpcr & 0x3UL;
@@ -655,7 +579,11 @@ void helper_ieee_input(CPUSW64State *env, uint64_t val)
     uint32_t exp = (uint32_t)(val >> 52) & 0x7ff;
     uint64_t frac = val & 0xfffffffffffffull;
 
-    if (exp == 0x7ff) {
+    if (exp == 0) {
+        /* Denormals without /S raise an exception.  */
+        if (frac != 0) {
+        }
+    } else if (exp == 0x7ff) {
         /* Infinity or NaN.  */
         uint32_t exc_type = EXC_M_INV;
 

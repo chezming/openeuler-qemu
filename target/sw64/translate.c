@@ -399,7 +399,7 @@ static inline void gen_store_mem(
     va = (fp ? cpu_fr[ra] : load_gir(ctx, ra));
 
     tcg_gen_qemu_store(va, addr, ctx->mem_idx);
-    gen_helper_trace_mem(cpu_env, addr, va);
+
     tcg_temp_free(tmp);
 }
 
@@ -894,7 +894,6 @@ static inline void gen_load_mem_simd(
     }
 
     tcg_gen_qemu_load(ra, addr, ctx->mem_idx);
-    // FIXME: for debug
 
     tcg_temp_free(tmp);
 }
@@ -917,7 +916,6 @@ static inline void gen_store_mem_simd(
     if (mask) {
         tcg_gen_andi_i64(addr, addr, mask);
     }
-    // FIXME: for debug
     tcg_gen_qemu_store(ra, addr, ctx->mem_idx);
 
     tcg_temp_free(tmp);
@@ -3368,10 +3366,6 @@ DisasJumpType translate_one(DisasContextBase *dcbase, uint32_t insn,
                 /* VCPYW */
                 tmp64 = tcg_temp_new();
                 tmp64_0 = tcg_temp_new();
-                /*  FIXME: for debug
-                tcg_gen_movi_i64(tmp64, ra);
-                gen_helper_v_print(cpu_env, tmp64);
-		*/
                 tcg_gen_shri_i64(tmp64, cpu_fr[ra], 29);
                 tcg_gen_andi_i64(tmp64_0, tmp64, 0x3fffffffUL);
                 tcg_gen_shri_i64(tmp64, cpu_fr[ra], 62);
@@ -3384,12 +3378,6 @@ DisasJumpType translate_one(DisasContextBase *dcbase, uint32_t insn,
                 tcg_gen_mov_i64(cpu_fr[rc + 32], cpu_fr[rc]);
                 tcg_gen_mov_i64(cpu_fr[rc + 64], cpu_fr[rc]);
                 tcg_gen_mov_i64(cpu_fr[rc + 96], cpu_fr[rc]);
-                /*  FIXME: for debug
-                tcg_gen_movi_i64(tmp64, rb);
-		gen_helper_v_print(cpu_env, tmp64);
-		tcg_gen_movi_i64(tmp64, rc);
-                gen_helper_v_print(cpu_env, tmp64);
-		*/
                 tcg_temp_free(tmp64);
                 tcg_temp_free(tmp64_0);
                 break;
@@ -3728,7 +3716,6 @@ static void sw64_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
     translator_loop_temp_check(&ctx->base);
 }
 
-/* FIXME:Linhainan */
 static void sw64_tr_tb_stop(DisasContextBase* dcbase, CPUState* cpu) {
     DisasContext* ctx = container_of(dcbase, DisasContext, base);
 
@@ -3753,7 +3740,6 @@ static void sw64_tr_tb_stop(DisasContextBase* dcbase, CPUState* cpu) {
         /* FALLTHRU */
         case DISAS_PC_UPDATED_NOCHAIN:
             if (ctx->base.singlestep_enabled) {
-                /* FIXME: for gdb*/
                 cpu_loop_exit(cpu);
             } else {
                 tcg_gen_exit_tb(NULL, 0);
