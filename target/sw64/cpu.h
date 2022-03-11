@@ -236,6 +236,10 @@ void sw64_stl_phys(CPUState *cs, hwaddr addr, uint64_t val);
 uint64_t sw64_ldw_phys(CPUState *cs, hwaddr addr);
 void sw64_stw_phys(CPUState *cs, hwaddr addr, uint64_t val);
 uint64_t cpu_sw64_load_fpcr(CPUSW64State *env);
+#ifndef CONFIG_USER_ONLY
+void sw64_cpu_do_interrupt(CPUState *cs);
+bool sw64_cpu_exec_interrupt(CPUState *cpu, int int_req);
+#endif
 void cpu_sw64_store_fpcr(CPUSW64State *env, uint64_t val);
 void sw64_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
     MMUAccessType access_type, int mmu_idx,

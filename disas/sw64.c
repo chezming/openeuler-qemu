@@ -228,11 +228,6 @@ extern const unsigned sw64_num_operands;
 #define SW_REG_SP	30
 #define SW_REG_ZERO	31
 
-enum bfd_reloc_code_real {
-    BFD_RELOC_23_PCREL_S2,
-    BFD_RELOC_SW64_HINT
-};
-
 static unsigned insert_rba(unsigned insn, int value ATTRIBUTE_UNUSED,
         const char **errmsg ATTRIBUTE_UNUSED)
 {
@@ -329,18 +324,6 @@ static unsigned insert_bdisp(unsigned insn, int value, const char **errmsg)
 static int extract_bdisp(unsigned insn, int *invalid ATTRIBUTE_UNUSED)
 {
     return 4 * (((insn & 0x1FFFFF) ^ 0x100000) - 0x100000);
-}
-
-static unsigned insert_bdisp26(unsigned insn, int value, const char **errmsg)
-{
-    if (errmsg != (const char **)NULL && (value & 3))
-        *errmsg = "branch operand unaligned";
-    return insn | ((value / 4) & 0x3FFFFFF);
-}
-
-static int extract_bdisp26(unsigned insn, int *invalid ATTRIBUTE_UNUSED)
-{
-    return 4 * (((insn & 0x3FFFFFF) ^ 0x2000000) - 0x2000000);
 }
 
 /* The hint field of a JMP/JSR insn. */
@@ -440,7 +423,7 @@ const struct sw64_operand sw64_operands[] = {
 
     /* The signed "23-bit" aligned displacement of Branch format insns. */
 #define BDISP		(MDISP + 1)
-    { 21, 0, BFD_RELOC_23_PCREL_S2,
+    { 21, 0, -BDISP,
         SW_OPERAND_RELATIVE, insert_bdisp, extract_bdisp },
 
     /* The 26-bit hmcode function for sys_call and sys_call / b. */
@@ -450,7 +433,7 @@ const struct sw64_operand sw64_operands[] = {
     /* sw jsr/ret insntructions has no function bits. */
     /* The optional signed "16-bit" aligned displacement of the JMP/JSR hint. */
 #define JMPHINT		(HMFN + 1)
-    { 16, 0, BFD_RELOC_SW64_HINT,
+    { 16, 0, -JMPHINT,
         SW_OPERAND_RELATIVE | SW_OPERAND_DEFAULT_ZERO | SW_OPERAND_NOOVERFLOW,
         insert_jhint, extract_jhint },
 
@@ -469,7 +452,7 @@ const struct sw64_operand sw64_operands[] = {
     { 16, 0, -HWINDEX, SW_OPERAND_UNSIGNED, 0, 0 },
 
     /* for the third operand of ternary operands integer insn. */
-#define R3              (HWJMPHINT + 1)
+#define R3              (JMPHINT + 1)
     { 5, 5, 0, SW_OPERAND_IR, 0, 0 },
     /* The plain fp register fields */
 #define F3              (R3 + 1)
@@ -477,19 +460,10 @@ const struct sw64_operand sw64_operands[] = {
     /* sw simd settle instruction lit */
 #define FMALIT          (F3 + 1)
     { 5,  5, -FMALIT, SW_OPERAND_UNSIGNED, 0, 0 },    //V1.1
-#define LMDISP          (FMALIT + 1)
-    { 15, 0, -LMDISP, SW_OPERAND_UNSIGNED, 0, 0 },
-#define RPIINDEX        (LMDISP + 1)
+#define RPIINDEX        (FMALIT + 1)
     { 8, 0, -RPIINDEX, SW_OPERAND_UNSIGNED, 0, 0 },
 #define ATMDISP         (RPIINDEX + 1)
     { 12, 0, -ATMDISP, SW_OPERAND_SIGNED, 0, 0 },
-#define DISP13          (ATMDISP + 1)
-    { 13, 13, -DISP13, SW_OPERAND_SIGNED, 0, 0},
-#define BDISP26         (DISP13 + 1)
-    { 26, 0, 222,
-        SW_OPERAND_RELATIVE, insert_bdisp26, extract_bdisp26 },
-#define DPFTH           (BDISP26  + 1)
-    { 5, 21, -DPFTH, SW_OPERAND_UNSIGNED, 0, 0}
 };
 
 const unsigned sw64_num_operands = sizeof(sw64_operands) / sizeof(*sw64_operands);
@@ -561,7 +535,7 @@ const unsigned sw64_num_operands = sizeof(sw64_operands) / sizeof(*sw64_operands
 #define PRIRET_MASK     (OP_MASK | 0x100000)
 #define PRIRET(oo,h)    PRIRET_(oo,h), PRIRET_MASK
 
-/* sw rpi_rcsr,rpi_wcsr. */
+/* sw pri_rcsr,pri_wcsr. */
 #define CSR_(oo,ff)     (OP(oo) | (((ff) & 0xFF) << 8))
 #define CSR_MASK        (OP_MASK | 0xFF00)
 #define CSR(oo,ff)      CSR_(oo,ff), CSR_MASK
@@ -593,8 +567,6 @@ const unsigned sw64_num_operands = sizeof(sw64_operands) / sizeof(*sw64_operands
 #define ARG_FMEM	{ FA, MDISP, PRB }
 #define ARG_OPR		{ RA, RB, DRC1 }
 
-#define ARG_OPRCAS	{ RA, RB, RC }
-
 #define ARG_OPRL	{ RA, LIT, DRC1 }
 #define ARG_OPRZ1	{ ZA, RB, DRC1 }
 #define ARG_OPRLZ1	{ ZA, LIT, RC }
@@ -608,9 +580,6 @@ const unsigned sw64_num_operands = sizeof(sw64_operands) / sizeof(*sw64_operands
 #define ARG_FMAL        { FA,FB,FMALIT, DFC1 }
 #define ARG_ATMEM       { RA, ATMDISP, PRB }
 #define ARG_VUAMEM      { FA, ATMDISP, PRB }
-#define ARG_OPRLZ3      { RA, LIT, ZC }
-
-#define ARG_DISP13      {DISP13, RC}
 
 /* The opcode table.
 
@@ -645,6 +614,7 @@ const struct sw64_opcode sw64_opcodes[] = {
     { "jmp",            MEM(0x03), BASE, { RA, CPRB, JMPHINT } },
     { "br",             BRA(0x04), BASE, { ZA, BDISP } },
     { "br",             BRA(0x04), BASE, ARG_BRA },
+    { "bsr",            BRA(0x05), BASE, { ZA, BDISP } },
     { "bsr",            BRA(0x05), BASE, ARG_BRA },
     { "memb",           MFC(0x06,0x0000), BASE, ARG_NONE },
     { "imemb",          MFC(0x06,0x0001), BASE, ARG_NONE },

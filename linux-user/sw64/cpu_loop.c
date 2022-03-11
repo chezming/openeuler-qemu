@@ -18,8 +18,11 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu-common.h"
 #include "qemu.h"
+#include "user-internals.h"
 #include "cpu_loop-common.h"
+#include "signal-common.h"
 
 void cpu_loop(CPUSW64State *env)
 {

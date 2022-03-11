@@ -23,18 +23,7 @@
 #include "hw/core/cpu.h"
 #include "exec/memattrs.h"
 
-#if defined(CONFIG_USER_ONLY)
-bool sw64_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
-                         MMUAccessType access_type, int mmu_idx,
-                         bool probe, uintptr_t retaddr)
-{
-    SW64CPU *cpu = SW64_CPU(cs);
-
-    cs->exception_index = EXCP_MMFAULT;
-    cpu->env.trap_arg0 = address;
-    cpu_loop_exit_restore(cs, retaddr);
-}
-#else
+#ifndef CONFIG_USER_ONLY
 static target_ulong ldq_phys_clear(CPUState *cs, target_ulong phys)
 {
     return ldq_phys(cs->as, phys & ~(3UL));
@@ -216,6 +205,124 @@ do_pgmiss:
     fail = get_sw64_physical_address(&cpu->env, addr, 1, mmu_index, &phys, &prot);
 done:
     return (fail >= 0 ? -1 : phys);
+}
+
+#define a0(func) (((func & 0xFF) >> 6) & 0x1)
+#define a1(func) ((((func & 0xFF) >> 6) & 0x2) >> 1)
+
+#define t(func) ((a0(func) ^ a1(func)) & 0x1)
+#define b0(func) (t(func) | a0(func))
+#define b1(func) ((~t(func) & 1) | a1(func))
+
+#define START_SYS_CALL_ADDR(func) \
+    (b1(func) << 14) | (b0(func) << 13) | ((func & 0x3F) << 7)
+
+void sw64_cpu_do_interrupt(CPUState *cs)
+{
+    int i = cs->exception_index;
+
+    cs->exception_index = -1;
+    SW64CPU *cpu = SW64_CPU(cs);
+    CPUSW64State *env = &cpu->env;
+    switch (i) {
+    case EXCP_OPCDEC:
+        cpu_abort(cs, "ILLEGAL INSN");
+        break;
+    case EXCP_CALL_SYS:
+        i = START_SYS_CALL_ADDR(env->error_code);
+        if (i <= 0x3F) {
+            i += 0x4000;
+        } else if (i >= 0x40 && i <= 0x7F) {
+            i += 0x2000;
+        } else if (i >= 0x80 && i <= 0x8F) {
+            i += 0x6000;
+        }
+        break;
+    case EXCP_ARITH:
+        env->error_code = -1;
+        env->csr[EXC_PC] = env->pc - 4;
+        env->csr[EXC_SUM] = 1;
+        i = 0xB80;
+        break;
+    case EXCP_UNALIGN:
+        i = 0xB00;
+        env->csr[EXC_PC] = env->pc - 4;
+        break;
+    case EXCP_CLK_INTERRUPT:
+    case EXCP_DEV_INTERRUPT:
+        i = 0xE80;
+        break;
+    case EXCP_MMFAULT:
+        i = 0x980;
+        env->csr[EXC_PC] = env->pc;
+        break;
+    case EXCP_IIMAIL:
+        env->csr[EXC_PC] = env->pc;
+        i = 0xE00;
+        break;
+    default:
+        break;
+	}
+    env->pc = env->hm_entry + i;
+    env->flags = ENV_FLAG_HM_MODE;
+}
+
+bool sw64_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
+{
+    SW64CPU *cpu = SW64_CPU(cs);
+    CPUSW64State *env = &cpu->env;
+    int idx = -1;
+    /* We never take interrupts while in PALmode.  */
+    if (env->flags & ENV_FLAG_HM_MODE)
+        return false;
+
+    if (interrupt_request & CPU_INTERRUPT_IIMAIL) {
+        idx = EXCP_IIMAIL;
+        env->csr[INT_STAT] |= 1UL << 6;
+        if ((env->csr[IER] & env->csr[INT_STAT]) == 0)
+            return false;
+        cs->interrupt_request &= ~CPU_INTERRUPT_IIMAIL;
+        goto done;
+    }
+
+    if (interrupt_request & CPU_INTERRUPT_TIMER) {
+        idx = EXCP_CLK_INTERRUPT;
+        env->csr[INT_STAT] |= 1UL << 4;
+        if ((env->csr[IER] & env->csr[INT_STAT]) == 0)
+            return false;
+        cs->interrupt_request &= ~CPU_INTERRUPT_TIMER;
+        goto done;
+    }
+
+    if (interrupt_request & CPU_INTERRUPT_HARD) {
+        idx = EXCP_DEV_INTERRUPT;
+        env->csr[INT_STAT] |= 1UL << 12;
+        if ((env->csr[IER] & env->csr[INT_STAT]) == 0)
+            return false;
+        cs->interrupt_request &= ~CPU_INTERRUPT_HARD;
+        goto done;
+    }
+
+    if (interrupt_request & CPU_INTERRUPT_PCIE) {
+        idx = EXCP_DEV_INTERRUPT;
+        env->csr[INT_STAT] |= 1UL << 1;
+        env->csr[INT_PCI_INT] = 0x10;
+        if ((env->csr[IER] & env->csr[INT_STAT]) == 0)
+            return false;
+        cs->interrupt_request &= ~CPU_INTERRUPT_PCIE;
+        goto done;
+    }
+
+done:
+    if (idx >= 0) {
+        cs->exception_index = idx;
+        env->error_code = 0;
+        env->csr[EXC_PC] = env->pc;
+        sw64_cpu_do_interrupt(cs);
+        return true;
+    }
+
+    return false;
 }
 #endif
 
