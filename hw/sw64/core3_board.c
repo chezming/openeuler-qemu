@@ -65,10 +65,13 @@ static PCIINTxRoute sw_route_intx_pin_to_irq(void *opaque, int pin)
 
 static uint64_t convert_bit(int n)
 {
-    uint64_t ret = (1UL << n) - 1;
+    uint64_t ret;
 
     if (n == 64)
         ret = 0xffffffffffffffffUL;
+    else
+        ret = (1UL << n) - 1;
+
     return ret;
 }
 
