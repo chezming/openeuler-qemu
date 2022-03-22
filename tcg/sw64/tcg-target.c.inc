@@ -914,15 +914,15 @@ static void tcg_out_ldst(TCGContext *s, SW_64Insn insn, TCGReg rd, TCGReg rn, in
     case OPC_LDBU:
         if (sign)
             tcg_out_insn_simpleReg(s, OPC_SEXTB, rd, TCG_REG_ZERO, rd);  //for micro-op:INDEX_op_ld8s_i32/64,set rd[63,8]=1
-            break;
+        break;
     case OPC_LDHU:
         if (sign)
             tcg_out_insn_simpleReg(s, OPC_SEXTH, rd, TCG_REG_ZERO, rd);  //for micro-op:INDEX_op_ld16s_i32/64,set rd[63,16]=1
-            break;
+        break;
     case OPC_LDW:
         if (!sign)
             tcg_out_insn_simpleImm(s, OPC_ZAPNOT_I, rd, rd, 0xf);  //for micro-op:INDEX_op_ld32u_i32/64,set rd[63,32]=0
-            break;
+        break;
     default:
         break;
     }
