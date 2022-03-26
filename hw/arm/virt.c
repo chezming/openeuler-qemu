@@ -1966,9 +1966,6 @@ static void virt_cpu_post_init(VirtMachineState *vms, MemoryRegion *sysmem)
             MemoryRegion *pvtime = g_new(MemoryRegion, 1);
             hwaddr pvtime_size = max_cpus * PVTIME_SIZE_PER_CPU;
 
-            /* The memory region size must be a multiple of host page size. */
-            pvtime_size = REAL_HOST_PAGE_ALIGN(pvtime_size);
-
             if (pvtime_size > pvtime_reg_size) {
                 error_report("pvtime requires a %" HWADDR_PRId
                              " byte memory region for %d CPUs,"
@@ -1977,7 +1974,7 @@ static void virt_cpu_post_init(VirtMachineState *vms, MemoryRegion *sysmem)
                 exit(1);
             }
 
-            memory_region_init_ram(pvtime, NULL, "pvtime", pvtime_size, NULL);
+            memory_region_init_ram(pvtime, NULL, "pvtime", pvtime_reg_size, NULL);
             memory_region_add_subregion(sysmem, pvtime_reg_base, pvtime);
         }
 
