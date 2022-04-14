@@ -2017,6 +2017,57 @@ static void build_processor_hierarchy_node(GArray *tbl, uint32_t flags,
 }
 
 #ifdef __aarch64__
+/* Phytium FT-2000+ cache info*/
+static ArmCacheInfo FTC662_cache_descs[] = {
+    [ARM_L1D_CACHE] = { 1, 0, 127, 32768, 256, 2, 2, 64},
+    [ARM_L1I_CACHE] = { 1, 1, 95, 32768, 256, 2, 4, 64},
+    [ARM_L2_CACHE] = { 2, 2, 127, 2097152, 2048, 16, 10, 64},
+};
+
+/* Phytium S2500 cache info*/
+static ArmCacheInfo FTC663_cache_descs[] = {
+    [ARM_L1D_CACHE] = { 1, 0, 127, 32768, 256, 2, 2, 64},
+    [ARM_L1I_CACHE] = { 1, 1, 95, 32768, 256, 2, 4, 64},
+    [ARM_L2_CACHE] = { 2, 2, 127, 2097152, 2048, 16, 10, 64},
+    [ARM_L3_CACHE] = { 3, 2, 119, 8388608, 8192, 8, 8, 64},
+};
+
+/* default cache info*/
+static ArmCacheInfo default_cache_descs[] = {
+    [ARM_L1D_CACHE] = { 1, 0, 127, 65536, 256, 4, 2, 64},
+    [ARM_L1I_CACHE] = { 1, 1, 127, 65536, 256, 4, 4, 64},
+    [ARM_L2_CACHE] = { 2, 2, 127, 524288, 1024, 8, 10, 64},
+    [ARM_L3_CACHE] = { 3, 2, 127, 33554432, 2048, 15, 10, 128},
+};
+
+typedef struct ArmCacheHierarchy{
+    int cache_exists[4];
+    ArmCacheInfo *cacheinfo;
+} ArmCacheHierarchy;
+
+static ArmCacheHierarchy arm_cache_hierarchy = { .cache_exists = {1, 1, 1, 1}, .cacheinfo = NULL};
+
+static void arm_cacheinfo_init(void)
+{
+
+    unsigned long cpuid, part_id = 0, implementer_id = 0;
+
+    asm volatile("mrs %0, midr_el1" : "=r" (cpuid));
+
+    part_id = (cpuid >> 4) & 0xfff;
+    implementer_id = (cpuid >> 24) & 0xff;
+
+    printf("wq>> %s(%d) part_id = %lx implementer_id = %lx \n", __func__, __LINE__, part_id, implementer_id);
+    if(implementer_id == 0x70 && part_id == 0x662) {
+        arm_cache_hierarchy.cacheinfo = FTC662_cache_descs;
+        arm_cache_hierarchy.cache_exists[ARM_L3_CACHE] = 0;
+    } else if (implementer_id == 0x70 && part_id == 0x663) {
+        arm_cache_hierarchy.cacheinfo = FTC663_cache_descs;
+    } else {
+        arm_cache_hierarchy.cacheinfo = default_cache_descs;
+    }
+}
+
 /*
  * ACPI spec, Revision 6.3
  * 5.2.29.2 Cache Type Structure (Type 1)
@@ -2024,48 +2075,23 @@ static void build_processor_hierarchy_node(GArray *tbl, uint32_t flags,
 static void build_cache_hierarchy_node(GArray *tbl, uint32_t next_level,
                                        uint32_t cache_type)
 {
+    ArmCacheInfo *ca = arm_cache_hierarchy.cacheinfo + cache_type;
+
+    if(arm_cache_hierarchy.cache_exists[cache_type] == 0)
+        return;
+
     build_append_byte(tbl, 1);
     build_append_byte(tbl, 24);
     build_append_int_noprefix(tbl, 0, 2);
-    build_append_int_noprefix(tbl, 127, 4);
+    build_append_int_noprefix(tbl, ca->Arm_Cache_Flags, 4);
     build_append_int_noprefix(tbl, next_level, 4);
 
-    switch (cache_type) {
-    case ARM_L1D_CACHE: /* L1 dcache info */
-        build_append_int_noprefix(tbl, ARM_L1DCACHE_SIZE, 4);
-        build_append_int_noprefix(tbl, ARM_L1DCACHE_SETS, 4);
-        build_append_byte(tbl, ARM_L1DCACHE_ASSOCIATIVITY);
-        build_append_byte(tbl, ARM_L1DCACHE_ATTRIBUTES);
-        build_append_int_noprefix(tbl, ARM_L1DCACHE_LINE_SIZE, 2);
-        break;
-    case ARM_L1I_CACHE: /* L1 icache info */
-        build_append_int_noprefix(tbl, ARM_L1ICACHE_SIZE, 4);
-        build_append_int_noprefix(tbl, ARM_L1ICACHE_SETS, 4);
-        build_append_byte(tbl, ARM_L1ICACHE_ASSOCIATIVITY);
-        build_append_byte(tbl, ARM_L1ICACHE_ATTRIBUTES);
-        build_append_int_noprefix(tbl, ARM_L1ICACHE_LINE_SIZE, 2);
-        break;
-    case ARM_L2_CACHE: /* L2 cache info */
-        build_append_int_noprefix(tbl, ARM_L2CACHE_SIZE, 4);
-        build_append_int_noprefix(tbl, ARM_L2CACHE_SETS, 4);
-        build_append_byte(tbl, ARM_L2CACHE_ASSOCIATIVITY);
-        build_append_byte(tbl, ARM_L2CACHE_ATTRIBUTES);
-        build_append_int_noprefix(tbl, ARM_L2CACHE_LINE_SIZE, 2);
-        break;
-    case ARM_L3_CACHE: /* L3 cache info */
-        build_append_int_noprefix(tbl, ARM_L3CACHE_SIZE, 4);
-        build_append_int_noprefix(tbl, ARM_L3CACHE_SETS, 4);
-        build_append_byte(tbl, ARM_L3CACHE_ASSOCIATIVITY);
-        build_append_byte(tbl, ARM_L3CACHE_ATTRIBUTES);
-        build_append_int_noprefix(tbl, ARM_L3CACHE_LINE_SIZE, 2);
-        break;
-    default:
-        build_append_int_noprefix(tbl, 0, 4);
-        build_append_int_noprefix(tbl, 0, 4);
-        build_append_byte(tbl, 0);
-        build_append_byte(tbl, 0);
-        build_append_int_noprefix(tbl, 0, 2);
-    }
+    /* Cache info */
+    build_append_int_noprefix(tbl, ca->Arm_Cache_Size, 4);
+    build_append_int_noprefix(tbl, ca->Arm_Cache_Sets, 4);
+    build_append_byte(tbl, ca->Arm_Cache_Associativity);
+    build_append_byte(tbl, ca->Arm_Cache_Attributes);
+    build_append_int_noprefix(tbl, ca->Arm_Cache_Line_Size, 2);
 }
 
 /*
@@ -2082,14 +2108,18 @@ void build_pptt(GArray *table_data, BIOSLinker *linker, MachineState *ms,
     guint length, i;
     int uid = 0;
     int socket;
+    int priv_num = 0;
     AcpiTable table = { .sig = "PPTT", .rev = 2,
                         .oem_id = oem_id, .oem_table_id = oem_table_id };
 
     acpi_table_begin(&table, table_data);
 
+    arm_cacheinfo_init();
+
     for (socket = 0; socket < ms->smp.sockets; socket++) {
         uint32_t l3_cache_offset = table_data->len - pptt_start;
         build_cache_hierarchy_node(table_data, 0, ARM_L3_CACHE);
+        priv_num = arm_cache_hierarchy.cache_exists[ARM_L3_CACHE];
 
         g_queue_push_tail(list,
             GUINT_TO_POINTER(table_data->len - pptt_start));
@@ -2100,7 +2130,7 @@ void build_pptt(GArray *table_data, BIOSLinker *linker, MachineState *ms,
              * of a physical package
              */
             (1 << 0),
-            0, socket, &l3_cache_offset, 1);
+            0, socket, &l3_cache_offset, priv_num);
     }
 
     if (mc->smp_props.clusters_supported) {
@@ -2135,6 +2165,7 @@ void build_pptt(GArray *table_data, BIOSLinker *linker, MachineState *ms,
 
             priv_rsrc[2] = table_data->len - pptt_start; /* L1 icache offset */
             build_cache_hierarchy_node(table_data, priv_rsrc[0], ARM_L1I_CACHE);
+            priv_num = arm_cache_hierarchy.cache_exists[ARM_L1D_CACHE] + arm_cache_hierarchy.cache_exists[ARM_L1I_CACHE] + arm_cache_hierarchy.cache_exists[ARM_L2_CACHE];
 
             if (ms->smp.threads > 1) {
                 g_queue_push_tail(list,
@@ -2142,13 +2173,13 @@ void build_pptt(GArray *table_data, BIOSLinker *linker, MachineState *ms,
                 build_processor_hierarchy_node(
                     table_data,
                     (0 << 0), /* not a physical package */
-                    parent_offset, core, priv_rsrc, 3);
+                    parent_offset, core, priv_rsrc, priv_num);
             } else {
                 build_processor_hierarchy_node(
                     table_data,
                     (1 << 1) | /* ACPI Processor ID valid */
                     (1 << 3),  /* Node is a Leaf */
-                    parent_offset, uid++, priv_rsrc, 3);
+                    parent_offset, uid++, priv_rsrc, priv_num);
             }
         }
     }
