@@ -231,41 +231,17 @@ typedef enum {
     ARM_L3_CACHE
 } ArmCacheType;
 
-/* L1 data cache: */
-#define ARM_L1DCACHE_SIZE 65536
-#define ARM_L1DCACHE_SETS 256
-#define ARM_L1DCACHE_ASSOCIATIVITY 4
-#define ARM_L1DCACHE_ATTRIBUTES 2
-#define ARM_L1DCACHE_LINE_SIZE 64
 
-/* L1 instruction cache: */
-#define ARM_L1ICACHE_SIZE 65536
-#define ARM_L1ICACHE_SETS 256
-#define ARM_L1ICACHE_ASSOCIATIVITY 4
-#define ARM_L1ICACHE_ATTRIBUTES 4
-#define ARM_L1ICACHE_LINE_SIZE 64
-
-/* Level 2 unified cache: */
-#define ARM_L2CACHE_SIZE 524288
-#define ARM_L2CACHE_SETS 1024
-#define ARM_L2CACHE_ASSOCIATIVITY 8
-#define ARM_L2CACHE_ATTRIBUTES 10
-#define ARM_L2CACHE_LINE_SIZE 64
-
-/* Level 3 unified cache: */
-#define ARM_L3CACHE_SIZE 33554432
-#define ARM_L3CACHE_SETS 2048
-#define ARM_L3CACHE_ASSOCIATIVITY 15
-#define ARM_L3CACHE_ATTRIBUTES 10
-#define ARM_L3CACHE_LINE_SIZE 128
-
-struct offset_status {
-    uint32_t parent;
-    uint32_t l2_offset;
-    uint32_t l1d_offset;
-    uint32_t l1i_offset;
-};
-
+typedef struct ArmCacheInfo {
+    uint32_t Arm_Cache_Level;
+    uint32_t Arm_Cache_Type;
+    uint32_t Arm_Cache_Flags;
+    uint32_t Arm_Cache_Size;
+    uint32_t Arm_Cache_Sets;
+    uint32_t Arm_Cache_Associativity;
+    uint32_t Arm_Cache_Attributes;
+    uint32_t Arm_Cache_Line_Size;
+} ArmCacheInfo;
 #endif
 
 typedef
