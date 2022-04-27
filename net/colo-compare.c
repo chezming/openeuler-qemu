@@ -1235,8 +1235,10 @@ static void colo_compare_finalize(Object *obj)
         object_unref(OBJECT(s->iothread));
     }
 
-    qemu_mutex_destroy(&event_mtx);
-    qemu_cond_destroy(&event_complete_cond);
+    if(QTAILQ_EMPTY(&net_compares)) {
+        qemu_mutex_destroy(&event_mtx);
+        qemu_cond_destroy(&event_complete_cond);
+    }
 
     g_free(s->pri_indev);
     g_free(s->sec_indev);
