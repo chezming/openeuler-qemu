@@ -52,7 +52,7 @@ static int cpu_common_post_load(void *opaque, int version_id)
        version_id is increased. */
     cpu->interrupt_request &= ~0x01;
     tlb_flush(cpu);
-
+    // test
     /* loadvm has just updated the content of RAM, bypassing the
      * usual mechanisms that ensure we flush TBs for writes to
      * memory we've translated code from. So we must flush all TBs,
