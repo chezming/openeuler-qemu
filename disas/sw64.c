@@ -452,7 +452,7 @@ const struct sw64_operand sw64_operands[] = {
     { 16, 0, -HWINDEX, SW_OPERAND_UNSIGNED, 0, 0 },
 
     /* for the third operand of ternary operands integer insn. */
-#define R3              (JMPHINT + 1)
+#define R3              (HWINDEX + 1)
     { 5, 5, 0, SW_OPERAND_IR, 0, 0 },
     /* The plain fp register fields */
 #define F3              (R3 + 1)
