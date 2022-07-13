@@ -1,6 +1,8 @@
 #!/bin/bash
 echo `date +"============= %Y-%m-%d-%H:%M:%S ================"`
 echo "We will check whether the hmcode-version of this machine is correct ..."
+echo "If the hmcode version is too old, please refer to https://developer.wxiat.com/understand/ecologial/37
+for the right hmcode version ..."
 result=$(hexdump -C -v -s 130816 -n 48  /dev/mem | cut -c 62-77 | grep "Ver" | cut -c 12-16 )
 fir=0
 sec=0
