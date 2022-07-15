@@ -10,6 +10,13 @@ thi=6
 if [[ "$result" != "" ]]
 then
 	array=(${result//./ })
+	if [ "" = "${array[0]}" ] || [ "" = "${array[1]}" ] || [ "" = "${array[2]}" ];then
+                echo "error: hmcode version is too old , please upgrade your hmcode first !
+physical machine hmcode version must be higher than v1.1.6
+your local version is :"
+                echo $result
+                exit 1
+        fi
 	if [ ${array[0]} -gt $fir ];then
 		if [ ${array[1]} -gt $sec ];then
 			if [ ${array[2]} -gt $thi ];then
