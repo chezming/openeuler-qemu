@@ -1672,6 +1672,7 @@ if test "$targetos" = windows; then
   echo "CONFIG_WIN32=y" >> contrib/plugins/$config_host_mak
 fi
 
+<<<<<<< HEAD
 # tests/tcg configuration
 (config_host_mak=tests/tcg/config-host.mak
 mkdir -p tests/tcg
