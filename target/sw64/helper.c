@@ -38,7 +38,7 @@ static int get_sw64_physical_address(CPUSW64State *env, target_ulong addr,
     int prot = 0;
     int ret = MM_K_ACV;
     target_ulong L1pte, L2pte, L3pte, L4pte;
-    target_ulong pt, index, pte_pfn_s;
+    target_ulong pt = 0, index = 0, pte_pfn_s = 0;
 
     if (((addr >> 28) & 0xffffffff8) == 0xffffffff8) {
         phys = (~(0xffffffff80000000)) & addr;
@@ -159,7 +159,7 @@ bool sw64_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
     SW64CPU *cpu = SW64_CPU(cs);
     CPUSW64State *env = &cpu->env;
     target_ulong phys;
-    int prot, fail, DVA;
+    int prot, fail, DVA = 0;
     if (test_feature(env, SW64_FEATURE_CORE3)) {
         DVA = C3_DVA;
     } else if (test_feature(env, SW64_FEATURE_CORE4)){
