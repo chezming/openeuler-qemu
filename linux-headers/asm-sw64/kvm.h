@@ -2,6 +2,9 @@
 #define __LINUX_KVM_SW64_H
 
 #include <linux/types.h>
+
+#define __KVM_HAVE_GUEST_DEBUG
+
 /*
  * for KVM_GET_REGS and KVM_SET_REGS
  */
@@ -110,6 +113,7 @@ struct kvm_fpu {
  * KVM SW_64 specific structures and definitions
  */
 struct kvm_debug_exit_arch {
+	unsigned long epc;
 };
 
 /* for KVM_SET_GUEST_DEBUG */

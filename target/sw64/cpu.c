@@ -26,7 +26,6 @@
 #include "sysemu/reset.h"
 #include "hw/qdev-properties.h"
 
-
 static void sw64_cpu_set_pc(CPUState *cs, vaddr value)
 {
     SW64CPU *cpu = SW64_CPU(cs);
@@ -283,6 +282,12 @@ static void sw64_cpu_class_init(ObjectClass *oc, void *data)
     cc->set_pc = sw64_cpu_set_pc;
     cc->disas_set_info = sw64_cpu_disas_set_info;
     cc->dump_state = sw64_cpu_dump_state;
+
+    cc->gdb_read_register = sw64_cpu_gdb_read_register;
+    cc->gdb_write_register = sw64_cpu_gdb_write_register;
+    cc->gdb_num_core_regs = 67;
+    cc->gdb_core_xml_file = "sw64-core.xml";
+
     cc->tcg_ops = &sw64_tcg_ops;
 }
 

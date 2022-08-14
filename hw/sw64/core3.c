@@ -145,7 +145,10 @@ static void core3_init(MachineState *machine)
 
     /* Start all cpus at the hmcode RESET entry point.  */
     for (i = 0; i < machine->smp.cpus; ++i) {
-        cpus[i]->env.pc = hmcode_entry;
+	if (kvm_enabled())
+	    cpus[i]->env.pc = init_pc;
+	else
+	    cpus[i]->env.pc = hmcode_entry;
         cpus[i]->env.hm_entry = hmcode_entry;
     }
 
