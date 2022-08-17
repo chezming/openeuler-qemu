@@ -132,6 +132,8 @@ int kvm_arch_put_registers(CPUState *cs, int level)
     vcb = (struct vcpucb *)cpu->k_vcb;
     vcb->whami = kvm_arch_vcpu_id(cs);
     fprintf(stderr,"vcpu %ld init.\n", vcb->whami);
+	if (level == KVM_PUT_RESET_STATE)
+		vcb->pcbb = 0;
     return kvm_vcpu_ioctl(cs, KVM_SW64_SET_VCB, &cpu->k_vcb);
 }
 
