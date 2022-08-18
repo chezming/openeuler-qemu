@@ -71,6 +71,7 @@ void kvm_sw64_reset_vcpu(SW64CPU *cpu)
     CPUState *cs = CPU(cpu);
     struct kvm_regs *regs;
     int ret;
+    struct vcpucb *vcb;
 
     regs = (struct kvm_regs *)cpu->k_regs;
     regs->pc = init_pc;
@@ -81,6 +82,9 @@ void kvm_sw64_reset_vcpu(SW64CPU *cpu)
         fprintf(stderr, "kvm_sw64_vcpu_init failed: %s\n", strerror(-ret));
         abort();
     }
+
+    vcb = (struct vcpucb *)cpu->k_vcb;
+    vcb->vcpu_irq_disabled = 1;
 
     ret = kvm_vcpu_ioctl(cs, KVM_SW64_VCPU_INIT, NULL);
 
