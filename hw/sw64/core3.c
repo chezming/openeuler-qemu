@@ -178,6 +178,7 @@ static void core3_machine_init(MachineClass *mc)
     mc->init = core3_init;
     mc->block_default_type = IF_IDE;
     mc->max_cpus = MAX_CPUS_CORE3;
+    mc->pci_allow_0_address = true;
     mc->is_default = 0;
     mc->reset = board_reset;
     mc->possible_cpu_arch_ids = sw64_possible_cpu_arch_ids;
