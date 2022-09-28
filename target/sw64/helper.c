@@ -54,8 +54,13 @@ static int get_sw64_physical_address(CPUSW64State *env, target_ulong addr,
         goto exit;
     }
 do_pgmiss:
-    pte_pfn_s = 28;
-    pt = env->csr[PTBR];
+    if (test_feature(env, SW64_FEATURE_CORE3)) {
+        pte_pfn_s = 28;
+        pt = env->csr[C3_PTBR];
+    } else if (test_feature(env, SW64_FEATURE_CORE4)) {
+        pte_pfn_s = 24;
+        pt = (((addr>>52)&0x1) == 1) ? env->csr[C4_PTBR_SYS] : env->csr[C4_PTBR_USR];
+    }
     index = (addr >> (TARGET_PAGE_BITS + 3 * TARGET_LEVEL_BITS)) & ((1 << TARGET_LEVEL_BITS)-1);
     L1pte = ldq_phys_clear(cs, pt + index * 8);
     if ((L1pte & PTE_VALID) == 0) {
@@ -154,8 +159,12 @@ bool sw64_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
     SW64CPU *cpu = SW64_CPU(cs);
     CPUSW64State *env = &cpu->env;
     target_ulong phys;
-    int prot, fail;
-
+    int prot, fail, DVA;
+    if (test_feature(env, SW64_FEATURE_CORE3)) {
+        DVA = C3_DVA;
+    } else if (test_feature(env, SW64_FEATURE_CORE4)){
+        DVA = C4_DVA;
+    }
     if (mmu_idx == MMU_PHYS_IDX) {
         phys = address;
         prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
@@ -250,7 +259,10 @@ void sw64_cpu_do_interrupt(CPUState *cs)
         break;
     case EXCP_CLK_INTERRUPT:
     case EXCP_DEV_INTERRUPT:
-        i = 0xE80;
+        if (test_feature(env, SW64_FEATURE_CORE3))
+                i = 0xE80;/* core3 */
+        else if (test_feature(env, SW64_FEATURE_CORE4))
+                i = 0xE00;/* core4 */
         break;
     case EXCP_MMFAULT:
         i = 0x980;
@@ -271,10 +283,20 @@ bool sw64_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 {
     SW64CPU *cpu = SW64_CPU(cs);
     CPUSW64State *env = &cpu->env;
-    int idx = -1;
+    int idx = -1, INT_STAT = 0, IER = 0, PCI_INT = 0;
     /* We never take interrupts while in PALmode.  */
     if (env->flags & ENV_FLAG_HM_MODE)
         return false;
+
+    if (test_feature(env, SW64_FEATURE_CORE3)) {
+        IER = C3_IER;
+        INT_STAT = C3_INT_STAT;
+	PCI_INT = INT_PCI_INT;
+    } else if (test_feature(env, SW64_FEATURE_CORE4)) {
+        IER = INT_EN;
+        INT_STAT = C4_INT_STAT;
+	PCI_INT = PCIE_INT;
+    }
 
     if (interrupt_request & CPU_INTERRUPT_IIMAIL) {
         idx = EXCP_IIMAIL;
@@ -306,7 +328,7 @@ bool sw64_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
     if (interrupt_request & CPU_INTERRUPT_PCIE) {
         idx = EXCP_DEV_INTERRUPT;
         env->csr[INT_STAT] |= 1UL << 1;
-        env->csr[INT_PCI_INT] = 0x10;
+        env->csr[PCI_INT] = 0x10;
         if ((env->csr[IER] & env->csr[INT_STAT]) == 0)
             return false;
         cs->interrupt_request &= ~CPU_INTERRUPT_PCIE;
@@ -392,7 +414,7 @@ void cpu_sw64_store_fpcr(CPUSW64State* env, uint64_t val) {
 
 uint64_t helper_read_csr(CPUSW64State *env, uint64_t index)
 {
-    if (index == PRI_BASE)
+    if (index == C3_PRI_BASE)
         return 0x10000;
     return env->csr[index];
 }
@@ -415,11 +437,17 @@ void helper_write_csr(CPUSW64State *env, uint64_t index, uint64_t va)
     if ((index == DTB_IA) || (index == DTB_IV) || (index == DTB_IVP) ||
         (index == DTB_IU) || (index == DTB_IS) || (index == ITB_IA) ||
         (index == ITB_IV) || (index == ITB_IVP) || (index == ITB_IU) ||
-        (index == ITB_IS) || (index == PTBR)) {
+        (index == ITB_IS) || (index == C3_PTBR) || (index == C4_PTBR_SYS)
+        || (index == C4_PTBR_USR)) {
         tlb_flush(cs);
     }
-    if (index == INT_CLR || index == INT_PCI_INT) {
-        env->csr[INT_STAT] &= ~va;
+//core3
+    if (index == C3_INT_CLR || index == INT_PCI_INT) {
+        env->csr[C3_INT_STAT] &= ~va;
+    }
+//core4
+    if (index == C4_INT_CLR ) {
+        env->csr[C4_INT_STAT] &= ~va;
     }
 
     if (index == TIMER_CTL && env->csr[index] == 1) {

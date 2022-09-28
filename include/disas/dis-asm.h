@@ -190,6 +190,7 @@ enum bfd_architecture
   bfd_arch_sw64,       /* Sw64 */
 #define bfd_mach_sw64 1
 #define bfd_mach_sw64_core3 0x10
+#define bfd_mach_sw64_core4 0x20
   bfd_arch_arm,        /* Advanced Risc Machines ARM */
 #define bfd_mach_arm_unknown  0
 #define bfd_mach_arm_2        1

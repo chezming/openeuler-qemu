@@ -343,6 +343,84 @@ static void gen_mask_h(DisasContext *ctx, TCGv vc, TCGv va, TCGv vb,
     tcg_temp_free(shift);
 }
 
+static void gen_lshift_mask(TCGv v0, TCGv v1, int size)
+{
+    TCGv mask = tcg_const_i64((1UL << size) - 1);
+    int i;
+
+    tcg_gen_shl_i64(mask, mask, v1);
+    tcg_gen_andi_i64(mask, mask, (uint64_t)((1UL << size) - 1));
+    tcg_gen_mov_i64(v0, mask);
+
+    for (i = size; i < 64; i = i * 2) {
+        tcg_gen_shli_i64(mask, v0, i);
+        tcg_gen_or_i64(v0, mask, v0);
+    }
+    tcg_temp_free(mask);
+}
+
+static void gen_lshifti_mask(TCGv v0, int v1, int size)
+{
+    int i;
+    uint64_t mask;
+    mask = (1UL << size) - 1;
+    mask = (mask << v1) & (uint64_t)((1UL << size) - 1);
+    for (i = size; i < 64; i = i * 2) {
+        mask |= (mask << i);
+    }
+    tcg_gen_movi_i64(v0, mask);
+}
+
+static void gen_rshift_mask(TCGv v0, TCGv v1, int size)
+{
+    TCGv mask = tcg_const_i64((1UL << size) - 1);
+    int i;
+
+    tcg_gen_shr_i64(mask, mask, v1);
+    tcg_gen_mov_i64(v0, mask);
+
+    for (i = size; i < 64; i = i * 2) {
+        tcg_gen_shli_i64(mask, v0, i);
+        tcg_gen_or_i64(v0, mask, v0);
+    }
+    tcg_temp_free(mask);
+}
+
+static void gen_rshifti_mask(TCGv v0, int v1, int size)
+{
+    int i;
+    uint64_t mask;
+    mask = (1UL << size) - 1;
+    mask = (mask >> v1) & (uint64_t)((1UL << size) - 1);
+    for (i = size; i < 64; i = i * 2) {
+        mask |= (mask << i);
+    }
+    tcg_gen_movi_i64(v0, mask);
+}
+
+static void gen_rsign_mask(TCGv v0, TCGv v1,int size)
+{
+    TCGv mask, tmp;
+    uint64_t sign_mask = 0;
+    mask = tcg_temp_new();
+    tmp = tcg_temp_new();
+    int i;
+
+    for (i = 0; i < 64 / size; i++) {
+        sign_mask |= (1UL << (size - 1))  << (i * size);
+    }
+
+    tcg_gen_andi_i64(mask, v1, sign_mask);
+    tcg_gen_mov_i64(tmp, mask);
+    for (i = 1; i < size; i = i * 2) {
+        tcg_gen_shri_i64(mask, tmp, i);
+        tcg_gen_or_i64(tmp, mask, tmp);
+    }
+    tcg_gen_andc_i64(v0, tmp, v0);
+    tcg_temp_free(mask);
+    tcg_temp_free(tmp);
+}
+
 static inline void gen_load_mem(
     DisasContext *ctx, void (*tcg_gen_qemu_load)(TCGv t0, TCGv t1, int flags),
     int ra, int rb, int32_t disp16, bool fp, bool clear)
@@ -373,6 +451,7 @@ static inline void gen_load_mem(
 
     va = (fp ? cpu_fr[ra] : load_gir(ctx, ra));
     tcg_gen_qemu_load(va, addr, ctx->mem_idx);
+    //gen_helper_trace_mem(cpu_env, addr, va);
 
     tcg_temp_free(tmp);
 }
@@ -399,14 +478,15 @@ static inline void gen_store_mem(
     va = (fp ? cpu_fr[ra] : load_gir(ctx, ra));
 
     tcg_gen_qemu_store(va, addr, ctx->mem_idx);
-
+    gen_helper_trace_mem(cpu_env, addr, va);
     tcg_temp_free(tmp);
 }
 
 static void cal_with_iregs_2(DisasContext *ctx, TCGv vc, TCGv va, TCGv vb,
                              int32_t disp13, uint16_t fn)
 {
-    TCGv tmp;
+    TCGv tmp, t1;
+    TCGv_i32 tmpa, tmpb, tmpc;
 
     switch (fn & 0xff) {
     case 0x00:
@@ -493,6 +573,62 @@ static void cal_with_iregs_2(DisasContext *ctx, TCGv vc, TCGv va, TCGv vb,
         tcg_gen_mul_i64(vc, va, vb);
         tcg_gen_ext32s_i64(vc, vc);
         break;
+    case 0x11:
+        /* TODO: DIVW */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tmpa = tcg_temp_new_i32();
+        tmpb = tcg_temp_new_i32();
+        tmpc = tcg_temp_new_i32();
+        tcg_gen_extrl_i64_i32(tmpa, va);
+        tcg_gen_extrl_i64_i32(tmpb, vb);
+        tcg_gen_div_i32(tmpc, tmpa, tmpb);
+        tcg_gen_ext_i32_i64(vc, tmpc);
+        tcg_temp_free_i32(tmpa);
+        tcg_temp_free_i32(tmpb);
+        tcg_temp_free_i32(tmpc);
+        break;
+    case 0x12:
+        /* UDIVW */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tmpa = tcg_temp_new_i32();
+        tmpb = tcg_temp_new_i32();
+        tmpc = tcg_temp_new_i32();
+        tcg_gen_extrl_i64_i32(tmpa, va);
+        tcg_gen_extrl_i64_i32(tmpb, vb);
+        tcg_gen_divu_i32(tmpc, tmpa, tmpb);
+        tcg_gen_extu_i32_i64(vc, tmpc);
+        tcg_temp_free_i32(tmpa);
+        tcg_temp_free_i32(tmpb);
+        tcg_temp_free_i32(tmpc);
+        break;
+    case 0x13:
+        /* REMW */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tmpa = tcg_temp_new_i32();
+        tmpb = tcg_temp_new_i32();
+        tmpc = tcg_temp_new_i32();
+        tcg_gen_extrl_i64_i32(tmpa, va);
+        tcg_gen_extrl_i64_i32(tmpb, vb);
+        tcg_gen_rem_i32(tmpc, tmpa, tmpb);
+        tcg_gen_ext_i32_i64(vc, tmpc);
+        tcg_temp_free_i32(tmpa);
+        tcg_temp_free_i32(tmpb);
+        tcg_temp_free_i32(tmpc);
+        break;
+    case 0x14:
+        /* UREMW */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tmpa = tcg_temp_new_i32();
+        tmpb = tcg_temp_new_i32();
+        tmpc = tcg_temp_new_i32();
+        tcg_gen_extrl_i64_i32(tmpa, va);
+        tcg_gen_extrl_i64_i32(tmpb, vb);
+        tcg_gen_remu_i32(tmpc, tmpa, tmpb);
+        tcg_gen_extu_i32_i64(vc, tmpc);
+        tcg_temp_free_i32(tmpa);
+        tcg_temp_free_i32(tmpb);
+        tcg_temp_free_i32(tmpc);
+        break;
     case 0x18:
         /* MULL */
         tcg_gen_mul_i64(vc, va, vb);
@@ -502,6 +638,42 @@ static void cal_with_iregs_2(DisasContext *ctx, TCGv vc, TCGv va, TCGv vb,
         tmp = tcg_temp_new();
         tcg_gen_mulu2_i64(tmp, vc, va, vb);
         tcg_temp_free(tmp);
+        break;
+    case 0x1A:
+        /* DIVL */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tcg_gen_div_i64(vc, va, vb);
+        break;
+    case 0x1B:
+        /* UDIVL */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tcg_gen_divu_i64(vc, va, vb);
+        break;
+    case 0x1C:
+        /* REML */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tcg_gen_rem_i64(vc, va, vb);
+        break;
+    case 0x1D:
+        /* UREML */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tcg_gen_remu_i64(vc, va, vb);
+        break;
+    case 0x1E:
+        /* TODO:ADDPI */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tmp = tcg_const_i64(disp13);
+        tcg_gen_shli_i64(tmp, tmp, 2);
+	tcg_gen_addi_i64(vc, tmp, ctx->base.pc_next & ~3UL);
+        tcg_temp_free_i64(tmp);
+        break;
+    case 0x1F:
+        /* ADDPIS */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tmp = tcg_const_i64(disp13);
+        tcg_gen_shli_i64(tmp, tmp, 16);
+        tcg_gen_addi_i64(vc, tmp, ctx->base.pc_next & 0xffffffffffff0000);
+        tcg_temp_free_i64(tmp);
         break;
     case 0x28:
         /* CMPEQ */
@@ -522,6 +694,28 @@ static void cal_with_iregs_2(DisasContext *ctx, TCGv vc, TCGv va, TCGv vb,
     case 0x2c:
         /* CMPULE */
         tcg_gen_setcond_i64(TCG_COND_LEU, vc, va, vb);
+        break;
+    case 0x2D:
+        /* SBT */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tmp = tcg_temp_new_i64();
+        t1 = tcg_const_i64(1);
+        tcg_gen_andi_i64(tmp, vb, 0x3f);
+        tcg_gen_shl_i64(tmp, t1, tmp);
+        tcg_gen_or_i64(vc, va, tmp);
+        tcg_temp_free_i64(tmp);
+        tcg_temp_free_i64(t1);
+        break;
+    case 0x2E:
+        /* CBT */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tmp = tcg_temp_new_i64();
+        t1 = tcg_const_i64(1);
+        tcg_gen_andi_i64(tmp, vb, 0x3f);
+        tcg_gen_shl_i64(tmp, t1, tmp);
+        tcg_gen_andc_i64(vc, va, tmp);
+        tcg_temp_free_i64(tmp);
+        tcg_temp_free_i64(t1);
         break;
     case 0x38:
         /* AND */
@@ -600,6 +794,58 @@ static void cal_with_iregs_2(DisasContext *ctx, TCGv vc, TCGv va, TCGv vb,
         tcg_gen_sar_i64(vc, va, tmp);
         tcg_temp_free(tmp);
         break;
+    case 0x4B:
+        /* ROLL */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tmp = tcg_temp_new_i64();
+        tcg_gen_andi_i64(tmp, vb, 0x3f);
+        tcg_gen_rotl_i64(vc, va, tmp);
+        tcg_temp_free_i64(tmp);
+        break;
+    case 0x4C:
+        /* SLLW */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tmp = tcg_temp_new();
+        tcg_gen_andi_i64(tmp, vb, 0x1f);
+        tcg_gen_ext32u_i64(va, va);
+        tcg_gen_shl_i64(vc, va, tmp);
+        tcg_gen_ext32u_i64(vc, vc);
+        tcg_temp_free(tmp);
+        break;
+    case 0x4D:
+        /* SRLW */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tmp = tcg_temp_new();
+        tcg_gen_andi_i64(tmp, vb, 0x1f);
+        tcg_gen_ext32u_i64(va, va);
+        tcg_gen_shr_i64(vc, va, tmp);
+        tcg_gen_ext32u_i64(vc, vc);
+        tcg_temp_free(tmp);
+        break;
+    case 0x4E:
+        /* SRAW */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tmp = tcg_temp_new();
+        tcg_gen_andi_i64(tmp, vb, 0x1f);
+        tcg_gen_ext32s_i64(va, va);
+        tcg_gen_sar_i64(vc, va, tmp);
+        tcg_gen_ext32u_i64(vc, vc);
+        tcg_temp_free(tmp);
+        break;
+    case 0x4F:
+        /* ROLW */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tmpa = tcg_temp_new_i32();
+        tmpb = tcg_temp_new_i32();
+        tmpc = tcg_temp_new_i32();
+        tcg_gen_extrl_i64_i32(tmpa, va);
+        tcg_gen_extrl_i64_i32(tmpb, vb);
+        tcg_gen_rotl_i32(tmpc, tmpa, tmpb);
+        tcg_gen_extu_i32_i64(vc, tmpc);
+        tcg_temp_free_i32(tmpa);
+        tcg_temp_free_i32(tmpb);
+        tcg_temp_free_i32(tmpc);
+        break;
     case 0x50:
         /* EXTLB */
         gen_ext_l(ctx, vc, va, vb, 0x1);
@@ -643,6 +889,37 @@ static void cal_with_iregs_2(DisasContext *ctx, TCGv vc, TCGv va, TCGv vb,
     case 0x5a:
         /* CTTZ */
         tcg_gen_ctzi_i64(vc, vb, 64);
+        break;
+    case 0x5B:
+        /* REVBH */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tmp = tcg_temp_new_i64();
+        tcg_gen_andi_i64(tmp, vb, 0xffffUL);
+        tcg_gen_bswap16_i64(vc, tmp, TCG_BSWAP_IZ);
+        tcg_temp_free_i64(tmp);
+        break;
+    case 0x5C:
+        /* REVBW */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tmp = tcg_temp_new_i64();
+        tcg_gen_andi_i64(tmp, vb, 0xffffffffUL);
+        tcg_gen_bswap32_i64(vc, tmp, TCG_BSWAP_IZ);
+        tcg_temp_free_i64(tmp);
+        break;
+    case 0x5D:
+        /* REVBL */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tcg_gen_bswap64_i64(vc, vb);
+        break;
+    case 0x5E:
+        /* CASW */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tcg_gen_atomic_cmpxchg_i64(vc, vb, va, vc, ctx->mem_idx, MO_TEUL);
+        break;
+    case 0x5F:
+        /* CASL */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        tcg_gen_atomic_cmpxchg_i64(vc, vb, va, vc, ctx->mem_idx, MO_TEQ);
         break;
     case 0x60:
         /* MASKLB */
@@ -894,7 +1171,6 @@ static inline void gen_load_mem_simd(
     }
 
     tcg_gen_qemu_load(ra, addr, ctx->mem_idx);
-
     tcg_temp_free(tmp);
 }
 
@@ -917,7 +1193,6 @@ static inline void gen_store_mem_simd(
         tcg_gen_andi_i64(addr, addr, mask);
     }
     tcg_gen_qemu_store(ra, addr, ctx->mem_idx);
-
     tcg_temp_free(tmp);
 }
 
@@ -1140,6 +1415,18 @@ static void gen_fcvtdl(int rb, int rc, uint64_t round_mode)
     gen_fp_exc_raise(rc);
 }
 
+static void gen_transformat(int rb, int rc,
+                            void (*helper)(TCGv, TCGv_ptr, TCGv, TCGv),
+                            uint64_t round_mode)
+{
+    TCGv tmp64;
+    tmp64 = tcg_temp_new_i64();
+    tcg_gen_movi_i64(tmp64, round_mode);
+    helper(cpu_fr[rc], cpu_env, cpu_fr[rb], tmp64);
+    tcg_temp_free(tmp64);
+    gen_fp_exc_raise(rc);
+}
+
 static void cal_with_fregs_2(DisasContext *ctx, uint8_t rc, uint8_t ra,
                              uint8_t rb, uint8_t fn)
 {
@@ -1323,6 +1610,68 @@ static void cal_with_fregs_2(DisasContext *ctx, uint8_t rc, uint8_t ra,
         gen_helper_setfpcrx(cpu_env, tmp64);
         tcg_temp_free(tmp64);
         break;
+    case 0x58:
+        /* TODO:FRECS */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        gen_frecs(ctx, ra, rc);
+        break;
+    case 0x59:
+        /* TODO:FRECD */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        gen_frecd(ctx, ra, rc);
+        break;
+    case 0x5A:
+        /* TODO:FRIS */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        gen_transformat(rb, rc, gen_helper_fris,
+                        5);
+        break;
+    case 0x5B:
+        /* TODO:FRIS_G */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        gen_transformat(rb, rc, gen_helper_fris, 0);
+        break;
+    case 0x5C:
+        /* TODO:FRIS_P */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        gen_transformat(rb, rc, gen_helper_fris, 2);
+        break;
+    case 0x5D:
+        /* TODO:FRIS_Z */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        gen_transformat(rb, rc, gen_helper_fris, 3);
+        break;
+    case 0x5F:
+        /* TODO:FRIS_N */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        gen_transformat(rb, rc, gen_helper_fris, 1);
+        break;
+    case 0x60:
+        /* TODO:FRID */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        gen_transformat(rb, rc, gen_helper_frid,
+                        5);
+        break;
+    case 0x61:
+        /* TODO:FRID_G */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        gen_transformat(rb, rc, gen_helper_frid, 0);
+        break;
+    case 0x62:
+        /* TODO:FRID_P */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        gen_transformat(rb, rc, gen_helper_frid, 2);
+        break;
+    case 0x63:
+        /* TODO:FRID_Z */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        gen_transformat(rb, rc, gen_helper_frid, 3);
+        break;
+    case 0x64:
+        /* TODO:FRID_N */
+        arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+        gen_transformat(rb, rc, gen_helper_frid, 1);
+        break;
     default:
         fprintf(stderr, "Illegal insn func[%x]\n", fn);
         gen_invalid(ctx);
@@ -1376,7 +1725,6 @@ static void cal_with_fregs_4(DisasContext *ctx, uint8_t rd, uint8_t ra,
         break;
     case 0x10:
         /* FSELEQ */
-        // Maybe wrong translation.
         tmp64 = tcg_temp_new();
         gen_helper_fcmpeq(tmp64, cpu_env, va, zero);
         tcg_gen_movcond_i64(TCG_COND_EQ, vd, tmp64, zero, vc, vb);
@@ -1457,7 +1805,8 @@ static DisasJumpType gen_store_conditional(DisasContext *ctx, int ra, int rb,
     lab_done = gen_new_label();
     tcg_gen_brcond_i64(TCG_COND_NE, addr, cpu_lock_addr, lab_fail);
     tcg_temp_free_i64(addr);
-    tcg_gen_brcondi_i64(TCG_COND_NE, cpu_lock_flag, 0x1, lab_fail);
+    if (test_feature(ctx->env, SW64_FEATURE_CORE3))
+        tcg_gen_brcondi_i64(TCG_COND_NE, cpu_lock_flag, 0x1, lab_fail);
 #ifdef SW64_FIXLOCK
     TCGv val = tcg_temp_new_i64();
     tcg_gen_atomic_cmpxchg_i64(val, cpu_lock_addr, cpu_lock_value,
@@ -1474,6 +1823,11 @@ static DisasJumpType gen_store_conditional(DisasContext *ctx, int ra, int rb,
     tcg_gen_movi_i64(cpu_lock_success, 0);
     gen_set_label(lab_done);
 
+    if (test_feature(ctx->env, SW64_FEATURE_CORE4))
+    {
+	tcg_gen_mov_i64(load_gir(ctx, ra), cpu_lock_success);
+	tcg_gen_movi_i64(cpu_lock_success, 0);
+    }
     tcg_gen_movi_i64(cpu_lock_flag, 0);
     tcg_gen_movi_i64(cpu_lock_addr, -1);
     return DISAS_NEXT;
@@ -1655,6 +2009,43 @@ static void tcg_gen_sllowi_i64(int ra, int rc, int disp8)
     tcg_gen_andi_i64(shift, shift, 0xff);
 
     gen_helper_sllow(cpu_env, va, vc, shift);
+
+    tcg_temp_free(vc);
+    tcg_temp_free(va);
+    tcg_temp_free(shift);
+}
+
+static void tcg_gen_sraow_i64(int ra, int rc, int rb)
+{
+    TCGv va, vb, vc;
+    TCGv shift;
+
+    va = tcg_const_i64(ra);
+    vc = tcg_const_i64(rc);
+    shift = tcg_temp_new();
+    vb = cpu_fr[rb];
+    tcg_gen_shri_i64(shift, vb, 29);
+    tcg_gen_andi_i64(shift, shift, 0xff);
+
+    gen_helper_sraow(cpu_env, va, vc, shift);
+
+    tcg_temp_free(vc);
+    tcg_temp_free(va);
+    tcg_temp_free(shift);
+}
+
+static void tcg_gen_sraowi_i64(int ra, int rc, int disp8)
+{
+    TCGv va, vc;
+    TCGv shift;
+
+    va = tcg_const_i64(ra);
+    vc = tcg_const_i64(rc);
+    shift = tcg_temp_new();
+    tcg_gen_movi_i64(shift, disp8);
+    tcg_gen_andi_i64(shift, shift, 0xff);
+
+    gen_helper_sraow(cpu_env, va, vc, shift);
 
     tcg_temp_free(vc);
     tcg_temp_free(va);
@@ -2224,7 +2615,7 @@ DisasJumpType translate_one(DisasContextBase *dcbase, uint32_t insn,
     int32_t i;
     TCGv va, vb, vc, vd;
     TCGv_i32 tmp32;
-    TCGv_i64 tmp64, tmp64_0, tmp64_1, shift;
+    TCGv_i64 tmp64, tmp64_0, tmp64_1, tmp64_2, tmp64_3, shift;
     TCGv_i32 tmpa, tmpb, tmpc;
     DisasJumpType ret;
     DisasContext* ctx = container_of(dcbase, DisasContext, base);
@@ -2286,6 +2677,11 @@ DisasJumpType translate_one(DisasContextBase *dcbase, uint32_t insn,
             /* IMEMB */
             /* No achievement in Qemu*/
             break;
+        case 0x0002:
+            /* WMEMB */
+            arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+            tcg_gen_mb(TCG_MO_ST_ST | TCG_BAR_SC);
+            break;
         case 0x0020:
             /* RTC */
             if (disp16 && unlikely(ra == 31)) break;
@@ -2313,12 +2709,14 @@ DisasJumpType translate_one(DisasContextBase *dcbase, uint32_t insn,
             break;
         case 0x1000:
             /* RD_F */
+            if(test_feature(ctx->env, SW64_FEATURE_CORE4)) break;
             if (disp16 && unlikely(ra == 31)) break;
             va = load_gir(ctx, ra);
             tcg_gen_mov_i64(va, cpu_lock_success);
             break;
         case 0x1020:
             /* WR_F */
+            if(test_feature(ctx->env, SW64_FEATURE_CORE4)) break;
             if (disp16 && unlikely(ra == 31)) break;
             va = load_gir(ctx, ra);
             tcg_gen_andi_i64(cpu_lock_flag, va, 0x1);
@@ -2330,6 +2728,28 @@ DisasJumpType translate_one(DisasContextBase *dcbase, uint32_t insn,
             read_csr(0xc7, va);
             break;
         default:
+            if ((disp16 & 0xFF00) == 0xFC00) {
+                /* CSRWS */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new_i64();
+                read_csr(disp16 & 0xff, tmp64);
+                va = load_gir(ctx, ra);
+                tcg_gen_or_i64(tmp64, tmp64, va);
+                write_csr(disp16 & 0xff, tmp64, ctx->env);
+                tcg_temp_free_i64(tmp64);
+                break;
+            }
+            if ((disp16 & 0xFF00) == 0xFD00) {
+                /* CSRWC */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new_i64();
+                read_csr(disp16 & 0xff, tmp64);
+                va = load_gir(ctx, ra);
+                tcg_gen_andc_i64(tmp64, tmp64, va);
+                write_csr(disp16 & 0xff, tmp64, ctx->env);
+                tcg_temp_free_i64(tmp64);
+                break;
+            }
             if ((disp16 & 0xFF00) == 0xFE00) {
                 /* PRI_RCSR */
                 if (disp16 && unlikely(ra == 31)) break;
@@ -2340,7 +2760,7 @@ DisasJumpType translate_one(DisasContextBase *dcbase, uint32_t insn,
             if ((disp16 & 0xFF00) == 0xFF00) {
                 /* PRI_WCSR */
                 va = load_gir(ctx, ra);
-                write_csr(disp16 & 0xff, va, ctx->env);
+                write_csr(disp16 & 0xff, va ,ctx->env);
                 break;
             }
             goto do_invalid;
@@ -2924,6 +3344,294 @@ DisasJumpType translate_one(DisasContextBase *dcbase, uint32_t insn,
                     tcg_gen_subi_i64(cpu_fr[rc + i], cpu_fr[ra + i], disp8);
                 }
                 break;
+            case 0x10:
+                /* VSLLB */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                shift = tcg_temp_new();
+                tcg_gen_shri_i64(shift, cpu_fr[rb], 29);
+                tcg_gen_andi_i64(shift, shift, 0x7UL);
+                gen_lshift_mask(tmp64, shift, 8);
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_shl_i64(cpu_fr[rc + i], cpu_fr[ra + i], shift);
+                    tcg_gen_and_i64(cpu_fr[rc + i], tmp64, cpu_fr[rc + i]);
+                }
+                tcg_temp_free(tmp64);
+                tcg_temp_free(shift);
+                break;
+            case 0x30:
+                /* VSLLBI */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                gen_lshifti_mask(tmp64, disp8 & 0x7UL, 8);
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_shli_i64(cpu_fr[rc + i], cpu_fr[ra + i],
+                            disp8 & 0x7UL);
+                    tcg_gen_and_i64(cpu_fr[rc + i], tmp64, cpu_fr[rc + i]);
+                }
+                tcg_temp_free(tmp64);
+                break;
+            case 0x11:
+                /* VSRLB */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                shift = tcg_temp_new();
+                tcg_gen_shri_i64(shift, cpu_fr[rb], 29);
+                tcg_gen_andi_i64(shift, shift, 0x7UL);
+                gen_rshift_mask(tmp64, shift, 8);
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_shr_i64(cpu_fr[rc + i], cpu_fr[ra + i], shift);
+                    tcg_gen_and_i64(cpu_fr[rc + i], tmp64, cpu_fr[rc + i]);
+                }
+                tcg_temp_free(tmp64);
+                tcg_temp_free(shift);
+                break;
+            case 0x31:
+                /* VSRLBI */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                gen_rshifti_mask(tmp64, disp8 & 0x7UL, 8);
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_shri_i64(cpu_fr[rc + i], cpu_fr[ra + i],
+                            disp8 & 0x7UL);
+                    tcg_gen_and_i64(cpu_fr[rc + i], tmp64, cpu_fr[rc + i]);
+                }
+                break;
+            case 0x12:
+                /* VSRAB */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                tmp64_0 = tcg_temp_new();
+                tmp64_1 = tcg_temp_new();
+                shift = tcg_temp_new();
+                tcg_gen_shri_i64(shift, cpu_fr[rb], 29);
+                tcg_gen_andi_i64(shift, shift, 0x7UL);
+                gen_rshift_mask(tmp64, shift, 8);
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_mov_i64(tmp64_0, tmp64);
+                    gen_rsign_mask(tmp64_0, cpu_fr[ra + i], 8);
+                    tcg_gen_sar_i64(cpu_fr[rc + i], cpu_fr[ra + i], shift);
+                    tcg_gen_and_i64(cpu_fr[rc + i], tmp64, cpu_fr[rc + i]);
+                    tcg_gen_or_i64(cpu_fr[rc + i], tmp64_0, cpu_fr[rc + i]);
+                }
+                tcg_temp_free(tmp64);
+                tcg_temp_free(tmp64_0);
+                tcg_temp_free(shift);
+                break;
+            case 0x32:
+                /* VSRABI */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                tmp64_0 = tcg_temp_new();
+                gen_rshifti_mask(tmp64, disp8 & 0x7UL, 8);
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_mov_i64(tmp64_0, tmp64);
+                    gen_rsign_mask(tmp64_0, cpu_fr[ra + i], 8);
+                    tcg_gen_sari_i64(cpu_fr[rc + i], cpu_fr[ra + i], disp8 & 0x7UL);
+                    tcg_gen_and_i64(cpu_fr[rc + i], tmp64, cpu_fr[rc + i]);
+                    tcg_gen_or_i64(cpu_fr[rc + i], tmp64_0, cpu_fr[rc + i]);
+                }
+                tcg_temp_free(tmp64);
+                tcg_temp_free(tmp64_0);
+                break;
+            case 0x13:
+                /* VROLB */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                tmp64_0 = tcg_temp_new();
+                tmp64_1 = tcg_temp_new();
+                tmp64_2 = tcg_temp_new();
+                tmp64_3 = tcg_temp_new();
+                shift = tcg_temp_new();
+                tcg_gen_shri_i64(shift, cpu_fr[rb], 29);
+                tcg_gen_andi_i64(shift, shift, 0x7UL);
+                tcg_gen_subfi_i64(tmp64_3, 8, shift);
+                gen_lshift_mask(tmp64, shift, 8);
+                tcg_gen_not_i64(tmp64_0, tmp64);
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_shl_i64(tmp64_1, cpu_fr[ra + i], shift);
+                    tcg_gen_and_i64(tmp64_1, tmp64_1, tmp64);
+                    tcg_gen_shr_i64(tmp64_2, cpu_fr[ra + i], tmp64_3);
+                    tcg_gen_and_i64(tmp64_2, tmp64_2, tmp64_0);
+                    tcg_gen_or_i64(cpu_fr[rc + i], tmp64_1, tmp64_2);
+                }
+                tcg_temp_free(tmp64);
+                tcg_temp_free(tmp64_0);
+                tcg_temp_free(tmp64_1);
+                tcg_temp_free(tmp64_2);
+                tcg_temp_free(tmp64_3);
+                tcg_temp_free(shift);
+                break;
+            case 0x33:
+                /* VROLBI */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                tmp64_0 = tcg_temp_new();
+                tmp64_1 = tcg_temp_new();
+                tmp64_2 = tcg_temp_new();
+                tmp64_3 = tcg_temp_new();
+                shift = tcg_temp_new();
+                gen_lshifti_mask(tmp64, disp8 & 0x7UL, 8);
+                tcg_gen_not_i64(tmp64_0, tmp64);
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_shli_i64(tmp64_1, cpu_fr[ra + i], disp8 & 0x7UL);
+                    tcg_gen_and_i64(tmp64_1, tmp64_1, tmp64);
+                    tcg_gen_shri_i64(tmp64_2, cpu_fr[ra + i], 8 - (disp8 & 0x7UL));
+                    tcg_gen_and_i64(tmp64_2, tmp64_2, tmp64_0);
+                    tcg_gen_or_i64(cpu_fr[rc + i], tmp64_1, tmp64_2);
+                }
+                tcg_temp_free(tmp64);
+                tcg_temp_free(tmp64_0);
+                tcg_temp_free(tmp64_1);
+                tcg_temp_free(tmp64_2);
+                tcg_temp_free(tmp64_3);
+                tcg_temp_free(shift);
+                break;
+            case 0x14:
+                /* VSLLH */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                shift = tcg_temp_new();
+                tcg_gen_shri_i64(shift, cpu_fr[rb], 29);
+                tcg_gen_andi_i64(shift, shift, 0xfUL);
+                gen_lshift_mask(tmp64, shift, 16);
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_shl_i64(cpu_fr[rc + i], cpu_fr[ra + i], shift);
+                    tcg_gen_and_i64(cpu_fr[rc + i], tmp64, cpu_fr[rc + i]);
+                }
+                tcg_temp_free(tmp64);
+                tcg_temp_free(shift);
+                break;
+            case 0x34:
+                /* VSLLHI */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                gen_lshifti_mask(tmp64, disp8 & 0xfUL, 16);
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_shli_i64(cpu_fr[rc + i], cpu_fr[ra + i],
+                            disp8 & 0xfUL);
+                    tcg_gen_and_i64(cpu_fr[rc + i], tmp64, cpu_fr[rc + i]);
+                }
+                tcg_temp_free(tmp64);
+                break;
+            case 0x15:
+                /* VSRLH */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                shift = tcg_temp_new();
+                tcg_gen_shri_i64(shift, cpu_fr[rb], 29);
+                tcg_gen_andi_i64(shift, shift, 0xfUL);
+                gen_rshift_mask(tmp64, shift, 16);
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_shr_i64(cpu_fr[rc + i], cpu_fr[ra + i], shift);
+                    tcg_gen_and_i64(cpu_fr[rc + i], tmp64, cpu_fr[rc + i]);
+                }
+                tcg_temp_free(tmp64);
+                tcg_temp_free(shift);
+                break;
+            case 0x35:
+                /* VSRLHI */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                gen_rshifti_mask(tmp64, disp8 & 0xfUL, 16);
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_shri_i64(cpu_fr[rc + i], cpu_fr[ra + i],
+                            disp8 & 0xfUL);
+                    tcg_gen_and_i64(cpu_fr[rc + i], tmp64, cpu_fr[rc + i]);
+                }
+                tcg_temp_free(tmp64);
+                break;
+            case 0x16:
+                /* VSRAH */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                tmp64_0 = tcg_temp_new();
+                shift = tcg_temp_new();
+                tcg_gen_shri_i64(shift, cpu_fr[rb], 29);
+                tcg_gen_andi_i64(shift, shift, 0xfUL);
+                gen_rshift_mask(tmp64, shift, 16);
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_mov_i64(tmp64_0, tmp64);
+                    gen_rsign_mask(tmp64_0, cpu_fr[ra + i], 16);
+                    tcg_gen_sar_i64(cpu_fr[rc + i], cpu_fr[ra + i], shift);
+                    tcg_gen_and_i64(cpu_fr[rc + i], tmp64, cpu_fr[rc + i]);
+                    tcg_gen_or_i64(cpu_fr[rc + i], tmp64_0, cpu_fr[rc + i]);
+                }
+                tcg_temp_free(tmp64);
+                tcg_temp_free(tmp64_0);
+                tcg_temp_free(shift);
+                break;
+            case 0x36:
+                /* VSRAHI */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                tmp64_0 = tcg_temp_new();
+                shift = tcg_temp_new();
+                gen_rshifti_mask(tmp64, disp8 & 0xfUL, 16);
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_mov_i64(tmp64_0, tmp64);
+                    gen_rsign_mask(tmp64_0, cpu_fr[ra + i], 16);
+                    tcg_gen_sari_i64(cpu_fr[rc + i], cpu_fr[ra + i], disp8 & 0xfUL);
+                    tcg_gen_and_i64(cpu_fr[rc + i], tmp64, cpu_fr[rc + i]);
+                    tcg_gen_or_i64(cpu_fr[rc + i], tmp64_0, cpu_fr[rc + i]);
+                }
+                tcg_temp_free(tmp64);
+                tcg_temp_free(tmp64_0);
+                tcg_temp_free(shift);
+                break;
+            case 0x17:
+                /* VROLH */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                tmp64_0 = tcg_temp_new();
+                tmp64_1 = tcg_temp_new();
+                tmp64_2 = tcg_temp_new();
+                tmp64_3 = tcg_temp_new();
+                shift = tcg_temp_new();
+                tcg_gen_shri_i64(shift, cpu_fr[rb], 29);
+                tcg_gen_andi_i64(shift, shift, 0xfUL);
+                tcg_gen_subfi_i64(tmp64_3, 16, shift);
+                gen_lshift_mask(tmp64, shift, 16);
+                tcg_gen_not_i64(tmp64_0, tmp64);
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_shl_i64(tmp64_1, cpu_fr[ra + i], shift);
+                    tcg_gen_and_i64(tmp64_1, tmp64_1, tmp64);
+                    tcg_gen_shr_i64(tmp64_2, cpu_fr[ra + i], tmp64_3);
+                    tcg_gen_and_i64(tmp64_2, tmp64_2, tmp64_0);
+                    tcg_gen_or_i64(cpu_fr[rc + i], tmp64_1, tmp64_2);
+                }
+                tcg_temp_free(tmp64);
+                tcg_temp_free(tmp64_0);
+                tcg_temp_free(tmp64_1);
+                tcg_temp_free(tmp64_2);
+                tcg_temp_free(tmp64_3);
+                tcg_temp_free(shift);
+                break;
+            case 0x37:
+                /* VROLHI */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                tmp64_0 = tcg_temp_new();
+                tmp64_1 = tcg_temp_new();
+                tmp64_2 = tcg_temp_new();
+                tmp64_3 = tcg_temp_new();
+                shift = tcg_temp_new();
+                gen_lshifti_mask(tmp64, disp8 & 0xfUL, 16);
+                tcg_gen_not_i64(tmp64_0, tmp64);
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_shli_i64(tmp64_1, cpu_fr[ra + i], disp8 & 0xfUL);
+                    tcg_gen_and_i64(tmp64_1, tmp64_1, tmp64);
+                    tcg_gen_shri_i64(tmp64_2, cpu_fr[ra + i], 16 - (disp8 & 0xfUL));
+                    tcg_gen_and_i64(tmp64_2, tmp64_2, tmp64_0);
+                    tcg_gen_or_i64(cpu_fr[rc + i], tmp64_1, tmp64_2);
+                }
+                tcg_temp_free(tmp64);
+                tcg_temp_free(tmp64_0);
+                tcg_temp_free(tmp64_1);
+                tcg_temp_free(tmp64_2);
+                tcg_temp_free(tmp64_3);
+                tcg_temp_free(shift);
+                break;
             case 0x18:
                 /* CTPOPOW */
                 tmp64 = tcg_const_i64(0);
@@ -2942,6 +3650,112 @@ DisasJumpType translate_one(DisasContextBase *dcbase, uint32_t insn,
                 va = tcg_const_i64(ra);
                 gen_helper_ctlzow(cpu_fr[rc], cpu_env, va);
                 tcg_temp_free(va);
+                break;
+            case 0x1A:
+                /* VSLLL */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_shri_i64(tmp64, cpu_fr[rb], 29);
+                    tcg_gen_andi_i64(tmp64, tmp64, 0x3f);
+
+                    tcg_gen_shl_i64(cpu_fr[rc + i], cpu_fr[ra + i], tmp64);
+                }
+                tcg_temp_free(tmp64);
+                break;
+            case 0x3A:
+                /* VSLLLI */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_shli_i64(cpu_fr[rc + i], cpu_fr[ra + i],
+                                     disp8 & 0x3f);
+                }
+                break;
+            case 0x1B:
+                /* VSRLL */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_shri_i64(tmp64, cpu_fr[rb], 29);
+                    tcg_gen_andi_i64(tmp64, tmp64, 0x3f);
+
+                    tcg_gen_shr_i64(cpu_fr[rc + i], cpu_fr[ra + i], tmp64);
+                }
+                tcg_temp_free(tmp64);
+                break;
+            case 0x3B:
+                /* VSRLLI */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_shri_i64(cpu_fr[rc + i], cpu_fr[ra + i],
+                                     disp8 & 0x3f);
+                }
+                break;
+            case 0x1C:
+                /* VSRAL */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_shri_i64(tmp64, cpu_fr[rb], 29);
+                    tcg_gen_andi_i64(tmp64, tmp64, 0x3f);
+
+                    tcg_gen_sar_i64(cpu_fr[rc + i], cpu_fr[ra + i], tmp64);
+                }
+                tcg_temp_free(tmp64);
+                break;
+            case 0x3C:
+                /* VSRALI */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_sari_i64(cpu_fr[rc + i], cpu_fr[ra + i],
+                                     disp8 & 0x3f);
+                }
+                break;
+            case 0x1D:
+                /* VROLL */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_shri_i64(tmp64, cpu_fr[rb], 29);
+                    tcg_gen_andi_i64(tmp64, tmp64, 0x3f);
+
+                    tcg_gen_rotl_i64(cpu_fr[rc + i], cpu_fr[ra + i], tmp64);
+                }
+                tcg_temp_free(tmp64);
+                break;
+            case 0x3D:
+                /* VROLL */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_rotli_i64(cpu_fr[rc + i], cpu_fr[ra + i],
+                                      disp8 & 0x3f);
+                }
+                break;
+            case 0x1E:
+                /* VMAXB */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rc);
+
+                gen_helper_vmaxb(cpu_env, va, vb, vc);
+
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                break;
+            case 0x1F:
+                /* VMINB */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rc);
+
+                gen_helper_vminb(cpu_env, va, vb, vc);
+
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
                 break;
             case 0x40:
                 /* VUCADDW */
@@ -3063,6 +3877,296 @@ DisasJumpType translate_one(DisasContextBase *dcbase, uint32_t insn,
                 tcg_temp_free(vb);
                 tcg_temp_free(vc);
                 break;
+            case 0x46:
+                /* SRAOW */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tcg_gen_sraow_i64(ra, rc, rb);
+                break;
+            case 0x66:
+                /* SRAOWI */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tcg_gen_sraowi_i64(ra, rc, disp8);
+                break;
+            case 0x47:
+                /* TODO:VSUMW */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                tcg_gen_ext32u_i64(tmp64, cpu_fr[ra]);
+                tcg_gen_shri_i64(cpu_fr[rc], cpu_fr[ra], 32);
+                tcg_gen_add_i64(cpu_fr[rc], tmp64, cpu_fr[rc]);
+                for (i = 32; i < 128; i += 32) {
+                    tcg_gen_ext32u_i64(tmp64, cpu_fr[ra + i]);
+                    tcg_gen_add_i64(cpu_fr[rc], tmp64, cpu_fr[rc]);
+                    tcg_gen_shri_i64(tmp64, cpu_fr[ra + i], 32);
+                    tcg_gen_add_i64(cpu_fr[rc], tmp64, cpu_fr[rc]);
+                }
+                tcg_temp_free(tmp64);
+                break;
+            case 0x48:
+                /* VSUML */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tcg_gen_mov_i64(cpu_fr[rc], cpu_fr[ra]);
+                for (i = 32; i < 128; i += 32) {
+                    tcg_gen_add_i64(cpu_fr[rc], cpu_fr[ra + i], cpu_fr[rc]);
+                }
+                break;
+            case 0x49:
+                /* VSM4R */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rc);
+                gen_helper_vsm4r(cpu_env, va, vb, vc);
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                break;
+            case 0x4A:
+                /* VBINVW */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                for (i = 0; i < 128; i += 32) {
+                    tcg_gen_bswap64_i64(tmp64, cpu_fr[rb + i]);
+                    tcg_gen_rotli_i64(tmp64, tmp64, 32);
+                    tcg_gen_mov_i64(cpu_fr[rc + i], tmp64);
+                }
+                break;
+            case 0x4B:
+                /* VCMPUEQB */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rc);
+                gen_helper_vcmpueqb(cpu_env, va, vb, vc);
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                break;
+            case 0x6B:
+                /* VCMPUEQBI*/
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(disp8);
+                vc = tcg_const_i64(rc);
+                gen_helper_vcmpueqbi(cpu_env, va, vb, vc);
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                break;
+            case 0x4C:
+                /* VCMPUGTB */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rc);
+                gen_helper_vcmpugtb(cpu_env, va, vb, vc);
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                break;
+            case 0x6C:
+                /* VCMPUGTBI */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(disp8);
+                vc = tcg_const_i64(rc);
+                gen_helper_vcmpugtbi(cpu_env, va, vb, vc);
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                break;
+            case 0x4D:
+                /* VSM3MSW */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rc);
+                gen_helper_vsm3msw(cpu_env, va, vb, vc);
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                break;
+            case 0x50:
+                /* VMAXH */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rc);
+
+                gen_helper_vmaxh(cpu_env, va, vb, vc);
+
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                break;
+            case 0x51:
+                /* VMINH */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rc);
+
+                gen_helper_vminh(cpu_env, va, vb, vc);
+
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                break;
+            case 0x52:
+                /* VMAXW */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rc);
+
+                gen_helper_vmaxw(cpu_env, va, vb, vc);
+
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                break;
+            case 0x53:
+                /* VMINW */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rc);
+
+                gen_helper_vminw(cpu_env, va, vb, vc);
+
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                break;
+            case 0x54:
+                /* VMAXL */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    va = cpu_fr[ra + i];
+                    vb = cpu_fr[rb + i];
+                    vc = cpu_fr[rc + i];
+                    tcg_gen_movcond_i64(TCG_COND_GE, vc, va, vb, va, vb);
+                }
+                break;
+            case 0x55:
+                /* VMINL */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    va = cpu_fr[ra + i];
+                    vb = cpu_fr[rb + i];
+                    vc = cpu_fr[rc + i];
+                    tcg_gen_movcond_i64(TCG_COND_LE, vc, va, vb, va, vb);
+                }
+                break;
+            case 0x56:
+                /* VUMAXB */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rc);
+
+                gen_helper_vumaxb(cpu_env, va, vb, vc);
+
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                break;
+            case 0x57:
+                /* VUMINB */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rc);
+
+                gen_helper_vuminb(cpu_env, va, vb, vc);
+
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                break;
+            case 0x58:
+                /* VUMAXH */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rc);
+
+                gen_helper_vumaxh(cpu_env, va, vb, vc);
+
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                break;
+            case 0x59:
+                /* VUMINH */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rc);
+
+                gen_helper_vuminh(cpu_env, va, vb, vc);
+
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                break;
+            case 0x5A:
+                /* VUMAXW */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rc);
+
+                gen_helper_vumaxw(cpu_env, va, vb, vc);
+
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                break;
+            case 0x5B:
+                /* VUMINW */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rc);
+
+                gen_helper_vuminw(cpu_env, va, vb, vc);
+
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                break;
+            case 0x5C:
+                /* VUMAXL */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    va = cpu_fr[ra + i];
+                    vb = cpu_fr[rb + i];
+                    vc = cpu_fr[rc + i];
+                    tcg_gen_movcond_i64(TCG_COND_GEU, vc, va, vb, va, vb);
+                }
+                break;
+            case 0x5D:
+                /* VUMINL */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    va = cpu_fr[ra + i];
+                    vb = cpu_fr[rb + i];
+                    vc = cpu_fr[rc + i];
+                    tcg_gen_movcond_i64(TCG_COND_LEU, vc, va, vb, va, vb);
+                }
+                break;
+            case 0x68:
+                /* VSM4KEY */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(disp8);
+                vc = tcg_const_i64(rc);
+                gen_helper_vsm4key(cpu_env, va, vb, vc);
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                break;
             case 0x80:
                 /* VADDS */
                 for (i = 0; i < 128; i += 32)
@@ -3158,6 +4262,224 @@ DisasJumpType translate_one(DisasContextBase *dcbase, uint32_t insn,
                 gen_faddd(ctx, ra, ra + 32, rc);
                 gen_faddd(ctx, rc, ra + 64, rc);
                 gen_faddd(ctx, rc, ra + 96, rc);
+                break;
+            case 0x95:
+                /* VFCVTSD */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_helper_fcvtsd(cpu_fr[rc + i], cpu_env,
+                                      cpu_fr[rb + i]);
+                }
+                break;
+            case 0x96:
+                /* VFCVTDS */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_helper_fcvtds(cpu_fr[rc + i], cpu_env,
+                                      cpu_fr[rb + i]);
+                }
+                break;
+            case 0x99:
+                /* VFCVTLS */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_helper_fcvtls(cpu_fr[rc + i], cpu_env,
+                                      cpu_fr[rb + i]);
+                }
+                break;
+            case 0x9A:
+                /* VFCVTLD */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_helper_fcvtld(cpu_fr[rc + i], cpu_env,
+                                      cpu_fr[rb + i]);
+                }
+                break;
+            case 0x9B:
+                /* VFCVTDL */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_helper_fcvtdl_dyn(cpu_fr[rc + i], cpu_env,
+                        cpu_fr[rb + i]);
+                }
+                break;
+            case 0x9C:
+                /* VFCVTDL_G */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_fcvtdl(rb + i, rc + i, 0);
+                }
+                break;
+            case 0x9D:
+                /* VFCVTDL_P */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_fcvtdl(rb + i, rc + i, 2);
+                }
+                break;
+            case 0x9E:
+                /* VFCVTDL_Z */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_fcvtdl(rb + i, rc + i, 3);
+                }
+                break;
+            case 0x9F:
+                /* VFCVTDL_N */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_fcvtdl(rb + i, rc + i, 1);
+                }
+                break;
+            case 0xA0:
+                /* VFRIS */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_transformat(
+                        rb + i, rc + i, gen_helper_fris,
+                        5);
+                }
+                break;
+            case 0xA1:
+                /* VFRIS_G */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_transformat(rb + i, rc + i, gen_helper_fris, 0);
+                }
+                break;
+            case 0xA2:
+                /* VFRIS_P */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_transformat(rb + i, rc + i, gen_helper_fris, 2);
+                }
+                break;
+            case 0xA3:
+                /* VFRIS_Z */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_transformat(rb + i, rc + i, gen_helper_fris, 3);
+                }
+                break;
+            case 0xA4:
+                /* VFRIS_N */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_transformat(rb + i, rc + i, gen_helper_fris, 1);
+                }
+                break;
+            case 0xA5:
+                /* VFRID */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_transformat(rb + i, rc + i, gen_helper_frid, 5);
+                }
+                break;
+            case 0xA6:
+                /* VFRID_G */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_transformat(rb + i, rc + i, gen_helper_frid, 0);
+                }
+                break;
+            case 0xA7:
+                /* VFRID_P */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_transformat(rb + i, rc + i, gen_helper_frid, 2);
+                }
+                break;
+            case 0xA8:
+                /* VFRID_Z */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_transformat(rb + i, rc + i, gen_helper_frid, 3);
+                }
+                break;
+            case 0xA9:
+                /* VFRID_N */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_transformat(rb + i, rc + i, gen_helper_frid, 1);
+                }
+                break;
+            case 0xAA:
+                /* VFRECS */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_frecs(ctx, ra + i, rc + i);
+                }
+                break;
+            case 0xAB:
+                /* VFRECD */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                for (i = 0; i < 128; i += 32) {
+                    gen_frecd(ctx, ra + i, rc + i);
+                }
+                break;
+            case 0xAC:
+                /* VMAXS */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                tmp64_0 = tcg_const_i64(0);
+                for (i = 0; i < 128; i += 32) {
+                    va = cpu_fr[ra + i];
+                    vb = cpu_fr[rb + i];
+                    vc = cpu_fr[rc + i];
+                    gen_helper_fcmpge_s(tmp64, cpu_env, va, vb);
+                    tcg_gen_movcond_i64(TCG_COND_NE, vc, tmp64, tmp64_0,
+                                        va, vb);
+                }
+                tcg_temp_free(tmp64);
+                tcg_temp_free(tmp64_0);
+                break;
+            case 0xAD:
+                /* VMINS */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                tmp64_0 = tcg_const_i64(0);
+                for (i = 0; i < 128; i += 32) {
+                    va = cpu_fr[ra + i];
+                    vb = cpu_fr[rb + i];
+                    vc = cpu_fr[rc + i];
+                    gen_helper_fcmple_s(tmp64, cpu_env, va, vb);
+                    tcg_gen_movcond_i64(TCG_COND_NE, vc, tmp64, tmp64_0,
+                                        va, vb);
+                }
+                tcg_temp_free(tmp64);
+                tcg_temp_free(tmp64_0);
+                break;
+            case 0xAE:
+                /* VMAXD */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                tmp64_0 = tcg_const_i64(0);
+                for (i = 0; i < 128; i += 32) {
+                    va = cpu_fr[ra + i];
+                    vb = cpu_fr[rb + i];
+                    vc = cpu_fr[rc + i];
+                    gen_helper_fcmpge(tmp64, cpu_env, va, vb);
+                    tcg_gen_movcond_i64(TCG_COND_NE, vc, tmp64, tmp64_0,
+                                        va, vb);
+                }
+                tcg_temp_free(tmp64);
+                tcg_temp_free(tmp64_0);
+                break;
+            case 0xAF:
+                /* VMIND */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                tmp64_0 = tcg_const_i64(0);
+                for (i = 0; i < 128; i += 32) {
+                    va = cpu_fr[ra + i];
+                    vb = cpu_fr[rb + i];
+                    vc = cpu_fr[rc + i];
+                    gen_helper_fcmple(tmp64, cpu_env, va, vb);
+                    tcg_gen_movcond_i64(TCG_COND_NE, vc, tmp64, tmp64_0,
+                                        va, vb);
+                }
+                tcg_temp_free(tmp64);
+                tcg_temp_free(tmp64_0);
                 break;
             default:
                 printf("ILLEGAL BELOW OPC[%x] func[%08x]\n", opc, fn8);
@@ -3432,6 +4754,166 @@ DisasJumpType translate_one(DisasContextBase *dcbase, uint32_t insn,
                 tcg_temp_free(tmp64);
                 tcg_temp_free(vd);
                 break;
+            case 0x2A:
+                /* VINSB */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = cpu_fr[ra];
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rd);
+                vd = tcg_const_i64(rc);
+                gen_helper_vinsb(cpu_env, va, vb, vc, vd);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                tcg_temp_free(vd);
+                break;
+            case 0x2B:
+                /* VINSH */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = cpu_fr[ra];
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rd);
+                vd = tcg_const_i64(rc);
+                gen_helper_vinsh(cpu_env, va, vb, vc, vd);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                tcg_temp_free(vd);
+                break;
+            case 0x2C:
+                /* VINSECTLH */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vd = tcg_const_i64(rc);
+                gen_helper_vinsectlh(cpu_env, va, vb, vd);
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vd);
+                break;
+            case 0x2D:
+                /* VINSECTLW */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vd = tcg_const_i64(rc);
+                gen_helper_vinsectlw(cpu_env, va, vb, vd);
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vd);
+                break;
+            case 0x2E:
+                /* VINSECTLL */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                tmp64_0 = tcg_temp_new();
+                tcg_gen_mov_i64(cpu_fr[rc + 96], cpu_fr[rb + 32]);
+                tcg_gen_mov_i64(cpu_fr[rc + 64], cpu_fr[ra + 32]);
+                tcg_gen_mov_i64(cpu_fr[rc + 32], cpu_fr[rb]);
+                tcg_gen_mov_i64(cpu_fr[rc], cpu_fr[ra]);
+                break;
+            case 0x2F:
+                /* VINSECTLB */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vd = tcg_const_i64(rc);
+                gen_helper_vinsectlb(cpu_env, va, vb, vd);
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vd);
+                break;
+            case 0x30:
+                /* VSHFQ */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rd);
+                vd = tcg_const_i64(rc);
+                gen_helper_vshfq(cpu_env, va, vb, vc, vd);
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                tcg_temp_free(vd);
+                break;
+            case 0x31:
+                /* VSHFQB */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vd = tcg_const_i64(rc);
+                gen_helper_vshfqb(cpu_env, va, vb, vd);
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vd);
+                break;
+            case 0x32:
+                /* VCPYB */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                tcg_gen_andi_i64(cpu_fr[rc], cpu_fr[ra], 0xffUL);
+                tcg_gen_shli_i64(tmp64, cpu_fr[rc], 8);
+                tcg_gen_or_i64(cpu_fr[rc], tmp64, cpu_fr[rc]);
+                tcg_gen_shli_i64(tmp64, cpu_fr[rc], 16);
+                tcg_gen_or_i64(cpu_fr[rc], tmp64, cpu_fr[rc]);
+                tcg_gen_shli_i64(tmp64, cpu_fr[rc], 32);
+                tcg_gen_or_i64(cpu_fr[rc], tmp64, cpu_fr[rc]);
+                tcg_gen_mov_i64(cpu_fr[rc + 32], cpu_fr[rc]);
+                tcg_gen_mov_i64(cpu_fr[rc + 64], cpu_fr[rc]);
+                tcg_gen_mov_i64(cpu_fr[rc + 96], cpu_fr[rc]);
+                tcg_temp_free(tmp64);
+                break;
+            case 0x33:
+                /* VCPYH */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                tmp64 = tcg_temp_new();
+                tcg_gen_andi_i64(cpu_fr[rc], cpu_fr[ra], 0xffffUL);
+                tcg_gen_shli_i64(tmp64, cpu_fr[rc], 16);
+                tcg_gen_or_i64(cpu_fr[rc], tmp64, cpu_fr[rc]);
+                tcg_gen_shli_i64(tmp64, cpu_fr[rc], 32);
+                tcg_gen_or_i64(cpu_fr[rc], tmp64, cpu_fr[rc]);
+                tcg_gen_mov_i64(cpu_fr[rc + 32], cpu_fr[rc]);
+                tcg_gen_mov_i64(cpu_fr[rc + 64], cpu_fr[rc]);
+                tcg_gen_mov_i64(cpu_fr[rc + 96], cpu_fr[rc]);
+                tcg_temp_free(tmp64);
+                break;
+            case 0x34:
+                /* VSM3R */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rd);
+                vd = tcg_const_i64(rc);
+                gen_helper_vsm3r(cpu_env, va, vb, vc, vd);
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                tcg_temp_free(vd);
+                break;
+            case 0x35:
+                /* VFCVTSH */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rd);
+                vd = tcg_const_i64(rc);
+                gen_helper_vfcvtsh(cpu_env, va, vb, vc, vd);
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                tcg_temp_free(vd);
+                break;
+            case 0x36:
+                /* VFCVTHS */
+                arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+                va = tcg_const_i64(ra);
+                vb = tcg_const_i64(rb);
+                vc = tcg_const_i64(rd);
+                vd = tcg_const_i64(rc);
+                gen_helper_vfcvths(cpu_env, va, vb, vc, vd);
+                tcg_temp_free(va);
+                tcg_temp_free(vb);
+                tcg_temp_free(vc);
+                tcg_temp_free(vd);
+                break;
             default:
                 printf("ILLEGAL BELOW OPC[%x] func[%08x]\n", opc, fn6);
                 ret = gen_invalid(ctx);
@@ -3515,6 +4997,100 @@ DisasJumpType translate_one(DisasContextBase *dcbase, uint32_t insn,
                 printf("ILLEGAL BELOW OPC[%x] func[%08x]\n", opc, fn4);
                 ret = gen_invalid(ctx);
                 break;
+            }
+            break;
+        case 0x1D:
+            /* LBR */
+            arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+            ret = gen_bdirect(ctx, 31, disp26);
+            break;
+        case 0x1E:
+            /* LD/ST CORE4 */
+            arch_assert(test_feature(ctx->env, SW64_FEATURE_CORE4));
+            switch (fn4) {
+            case 0x0:
+                /* LDBU_A */
+                vb = load_gir(ctx, rb);
+                gen_load_mem(ctx, &tcg_gen_qemu_ld8u, ra, rb, 0, 0, 0);
+                tcg_gen_addi_i64(vb, vb, disp12);
+                break;
+            case 0x1:
+                /* LDHU_A */
+                vb = load_gir(ctx, rb);
+                gen_load_mem(ctx, &tcg_gen_qemu_ld16u, ra, rb, 0, 0, 0);
+                tcg_gen_addi_i64(vb, vb, disp12);
+                break;
+            case 0x2:
+                /* LDW_A */
+                vb = load_gir(ctx, rb);
+                /* SEXT to ra */
+                gen_load_mem(ctx, &tcg_gen_qemu_ld32s, ra, rb, 0, 0, 0);
+                tcg_gen_addi_i64(vb, vb, disp12);
+                break;
+            case 0x3:
+                /* LDL_A */
+                vb = load_gir(ctx, rb);
+                gen_load_mem(ctx, &tcg_gen_qemu_ld64, ra, rb, 0, 0, 0);
+                tcg_gen_addi_i64(vb, vb, disp12);
+                break;
+            case 0x4:
+                /* FLDS_A */
+                vb = load_gir(ctx, rb);
+                gen_load_mem(ctx, &gen_qemu_flds, ra, rb, 0, 1, 0);
+                tcg_gen_addi_i64(vb, vb, disp12);
+                break;
+            case 0x5:
+                /* FLDD_A */
+                vb = load_gir(ctx, rb);
+                gen_load_mem(ctx, &tcg_gen_qemu_ld64, ra, rb, 0, 1, 0);
+                tcg_gen_addi_i64(vb, vb, disp12);
+                break;
+            case 0x6:
+                /* STBU_A */
+                vb = load_gir(ctx, rb);
+                gen_store_mem(ctx, &tcg_gen_qemu_st8, ra, rb, 0, 0, 0);
+                tcg_gen_addi_i64(vb, vb, disp12);
+                break;
+            case 0x7:
+                /* STHU_A */
+                vb = load_gir(ctx, rb);
+                gen_store_mem(ctx, &tcg_gen_qemu_st16, ra, rb, 0, 0, 0);
+                tcg_gen_addi_i64(vb, vb, disp12);
+                break;
+            case 0x8:
+                /* STW_A */
+                vb = load_gir(ctx, rb);
+                gen_store_mem(ctx, &tcg_gen_qemu_st32, ra, rb, 0, 0, 0);
+                tcg_gen_addi_i64(vb, vb, disp12);
+                break;
+            case 0x9:
+                /* STL_A */
+                vb = load_gir(ctx, rb);
+                gen_store_mem(ctx, &tcg_gen_qemu_st64, ra, rb, 0, 0, 0);
+                tcg_gen_addi_i64(vb, vb, disp12);
+                break;
+            case 0xA:
+                /* FSTS_A */
+                vb = load_gir(ctx, rb);
+                gen_store_mem(ctx, &gen_qemu_fsts, ra, rb, 0, 1, 0);
+                tcg_gen_addi_i64(vb, vb, disp12);
+                break;
+            case 0xB:
+                /* FSTD_A */
+                vb = load_gir(ctx, rb);
+                gen_store_mem(ctx, &tcg_gen_qemu_st64, ra, rb, 0, 1,
+                              0);
+                tcg_gen_addi_i64(vb, vb, disp12);
+                break;
+            case 0xE:
+                /* TODO: DPFHR */
+                break;
+            case 0xF:
+                /* TODO: DPFHW */
+                break;
+            default:
+                printf("ILLEGAL BELOW OPC[%x] func[%08x]\n", opc, fn4);
+                ret = gen_invalid(ctx);
             }
             break;
         case 0x20:
@@ -3652,7 +5228,7 @@ DisasJumpType translate_one(DisasContextBase *dcbase, uint32_t insn,
         case 0x3f:
             /* LDIH */
             disp16 = ((uint32_t)disp16) << 16;
-	    if (ra == 31) break;
+            if (ra == 31) break;
             va = load_gir(ctx, ra);
             if (rb == 31) {
                 tcg_gen_movi_i64(va, disp16);

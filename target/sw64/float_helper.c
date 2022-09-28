@@ -188,6 +188,25 @@ static uint64_t do_fcvtdl(CPUSW64State *env, uint64_t a, uint64_t roundmode)
     return ret;
 }
 
+uint64_t helper_fris(CPUSW64State *env, uint64_t a, uint64_t roundmode)
+{
+    uint64_t ir;
+    float32 fr;
+
+    if (roundmode == 5)
+        roundmode = env->fpcr_round_mode;
+    ir = do_fcvtdl(env, a, roundmode);
+    fr = int64_to_float32(ir, &FP_STATUS);
+    return float32_to_s(fr);
+}
+
+uint64_t helper_frid(CPUSW64State *env, uint64_t a, uint64_t roundmode)
+{
+    if (roundmode == 5)
+        roundmode = env->fpcr_round_mode;
+    return int64_to_float64(do_fcvtdl(env, a, roundmode), &FP_STATUS);
+}
+
 uint64_t helper_fcvtdl(CPUSW64State *env, uint64_t a, uint64_t roundmode)
 {
     return do_fcvtdl(env, a, roundmode);
@@ -323,6 +342,7 @@ uint64_t helper_fdivd(CPUSW64State *env, uint64_t a, uint64_t b)
     fb = (float64)b;
     fr = float64_div(fa, fb, &FP_STATUS);
     env->error_code = soft_to_errcode_exc(env);
+
     return (uint64_t)fr;
 }
 
@@ -345,6 +365,7 @@ uint64_t helper_frecd(CPUSW64State *env, uint64_t a)
     fb = int64_to_float64(1, &FP_STATUS);
     fr = float64_div(fb, fa, &FP_STATUS);
     env->error_code = soft_to_errcode_exc(env);
+
     return (uint64_t)fr;
 }
 
@@ -354,6 +375,7 @@ uint64_t helper_fsqrts(CPUSW64State *env, uint64_t b)
     fb = s_to_float32(b);
     fr = float32_sqrt(fb, &FP_STATUS);
     env->error_code = soft_to_errcode_exc(env);
+
     return float32_to_s(fr);
 }
 
@@ -363,6 +385,7 @@ uint64_t helper_fsqrt(CPUSW64State *env, uint64_t b)
 
     fr = float64_sqrt(b, &FP_STATUS);
     env->error_code = soft_to_errcode_exc(env);
+
     return (uint64_t)fr;
 }
 
@@ -523,7 +546,6 @@ void helper_store_fpcr(CPUSW64State *env, uint64_t val)
     env->fp_status.flush_to_zero = env->fpcr_flush_to_zero;
 
     /* FIXME: Now the DNZ flag does not work int CORE3. */
-
     val &= ~0x3UL;
     val |= env->fpcr & 0x3UL;
     env->fpcr = val;
@@ -538,6 +560,7 @@ void helper_setfpcrx(CPUSW64State *env, uint64_t val)
         update_fpcr_status_mask(env);
     }
 }
+
 #ifndef CONFIG_USER_ONLY
 static uint32_t soft_to_exc_type(uint64_t exc)
 {

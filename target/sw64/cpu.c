@@ -123,7 +123,11 @@ static void sw64_cpu_realizefn(DeviceState *dev, Error **errp)
 
 static void sw64_cpu_disas_set_info(CPUState *cs, disassemble_info *info)
 {
-    info->mach = bfd_mach_sw64_core3;
+    CPUSW64State *env = cs->env_ptr;
+    if (test_feature(env, SW64_FEATURE_CORE3))
+        info->mach = bfd_mach_sw64_core3;
+    else if(test_feature(env, SW64_FEATURE_CORE4))
+        info->mach = bfd_mach_sw64_core4;
     info->print_insn = print_insn_sw64;
 }
 
@@ -137,6 +141,17 @@ static void core3_init(Object *obj)
     env->fpcr = 0x680e800000000000;
 #endif
     set_feature(env, SW64_FEATURE_CORE3);
+}
+
+static void core4_init(Object *obj)
+{
+    CPUState *cs = CPU(obj);
+    CPUSW64State *env = cs->env_ptr;
+#ifdef CONFIG_USER_ONLY
+    env->fpcr = 0x680e800000000000;
+    parallel_cpus = true;
+#endif
+    set_feature(env, SW64_FEATURE_CORE4);
 }
 
 static ObjectClass *sw64_cpu_class_by_name(const char *cpu_model)
@@ -276,6 +291,10 @@ static const SW64CPUInfo sw64_cpus[] =
     {
         .name = "core3",
         .initfn = core3_init,
+    },
+    {
+        .name = "core4",
+        .initfn = core4_init,
     },
     {
         .name = NULL
