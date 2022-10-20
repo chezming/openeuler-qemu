@@ -18,6 +18,8 @@
 #include "sysemu/kvm.h"
 #include "hw/pci/msi.h"
 #include "hw/sw64/sw64_iommu.h"
+#include "hw/loader.h"
+#include "hw/nvram/fw_cfg.h"
 
 #define TYPE_SWBOARD_PCI_HOST_BRIDGE "core_board-pcihost"
 #define SWBOARD_PCI_HOST_BRIDGE(obj) \
@@ -25,6 +27,8 @@
 
 #define MAX_IDE_BUS 2
 #define SW_PIN_TO_IRQ 16
+
+#define SW_FW_CFG_P_BASE (0x804920000000ULL)
 
 typedef struct SWBoard {
     SW64CPU *cpu[MAX_CPUS_CORE3];
@@ -41,6 +45,17 @@ typedef struct TimerState {
     void *opaque;
     int order;
 } TimerState;
+
+static void sw_create_fw_cfg(hwaddr addr)
+{
+    MachineState *ms = MACHINE(qdev_get_machine());
+    uint16_t smp_cpus = ms->smp.cpus;
+    FWCfgState *fw_cfg;
+    fw_cfg = fw_cfg_init_mem_wide(addr + 8, addr, 8,
+			     addr + 16, &address_space_memory);
+    fw_cfg_add_i16(fw_cfg, FW_CFG_NB_CPUS, smp_cpus);
+    rom_set_fw(fw_cfg);
+}
 
 #ifndef CONFIG_KVM
 static void swboard_alarm_timer(void *opaque)
@@ -509,6 +524,7 @@ void core3_board_init(SW64CPU *cpus[MAX_CPUS], MemoryRegion *ram)
                        DEVICE_LITTLE_ENDIAN);
     }
     pci_create_simple(phb->bus, -1, "nec-usb-xhci");
+    sw_create_fw_cfg(SW_FW_CFG_P_BASE);
 }
 
 static const TypeInfo swboard_pcihost_info = {
