@@ -40,6 +40,8 @@ blobs = [
   'uefi-bios-sw',
   'core3-reset',
   'core3-hmcode',
+  'core4-reset',
+  'core4-hmcode',
   'openbios-sparc32',
   'openbios-sparc64',
   'openbios-ppc',
