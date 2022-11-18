@@ -183,14 +183,14 @@ static void intpu_write(void *opaque, hwaddr addr, uint64_t val,
                         unsigned size)
 {
 #ifndef CONFIG_KVM
+    SW64CPU *cpu_current = SW64_CPU(current_cpu);
     BoardState *bs = (BoardState *)opaque;
     SW64CPU *cpu;
     switch (addr) {
     case 0x00:
-	val &= 0x1f;
-	cpu = bs->sboard.cpu[val];
-	cpu->env.csr[II_REQ] = 0x100000;
-	cpu_interrupt(CPU(cpu), CPU_INTERRUPT_IIMAIL);
+	cpu = bs->sboard.cpu[val & 0x3f];
+	cpu_interrupt(CPU(cpu), CPU_INTERRUPT_II0);
+	cpu_current->env.csr[II_REQ] &= ~(1 << 20);
 	break;
     default:
         fprintf(stderr, "Unsupported IPU addr: 0x%04lx\n", addr);

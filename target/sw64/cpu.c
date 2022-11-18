@@ -180,7 +180,7 @@ bool sw64_cpu_has_work(CPUState *cs)
      * wake up by hard interrupt, timer, ii, mail or mchk.
      */
     return cs->interrupt_request & (CPU_INTERRUPT_HARD | CPU_INTERRUPT_TIMER |
-                                    CPU_INTERRUPT_IIMAIL | CPU_INTERRUPT_MCHK);
+                                    CPU_INTERRUPT_II0 | CPU_INTERRUPT_MCHK);
 }
 
 static void sw64_cpu_initfn(Object *obj)

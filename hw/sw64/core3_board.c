@@ -189,7 +189,7 @@ static void intpu_write(void *opaque, hwaddr addr, uint64_t val,
         val &= 0x1f;
 	cpu = bs->sboard.cpu[val];
 	cpu->env.csr[II_REQ] = 0x100000;
-	cpu_interrupt(CPU(cpu),CPU_INTERRUPT_IIMAIL);
+	cpu_interrupt(CPU(cpu),CPU_INTERRUPT_II0);
 	break;
     default:
         fprintf(stderr, "Unsupported IPU addr: 0x%04lx\n", addr);

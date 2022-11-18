@@ -250,7 +250,7 @@ extern struct VMStateDescription vmstate_sw64_cpu;
 
 /* SW64-specific interrupt pending bits */
 #define CPU_INTERRUPT_TIMER CPU_INTERRUPT_TGT_EXT_0
-#define CPU_INTERRUPT_IIMAIL CPU_INTERRUPT_TGT_EXT_1
+#define CPU_INTERRUPT_II0 CPU_INTERRUPT_TGT_EXT_1
 #define CPU_INTERRUPT_MCHK CPU_INTERRUPT_TGT_EXT_2
 #define CPU_INTERRUPT_PCIE CPU_INTERRUPT_TGT_EXT_3
 #define CPU_INTERRUPT_WAKEUP CPU_INTERRUPT_TGT_EXT_3
@@ -299,6 +299,7 @@ enum {
         SWCSR(C4_DVA,           0x54),
         SWCSR(C4_PTBR_SYS,      0x68),
         SWCSR(C4_PTBR_USR,      0x69),
+        SWCSR(SOFT_CID,         0xc9),
 };
 
 #include "exec/cpu-all.h"
@@ -315,7 +316,7 @@ void sw64_translate_init(void);
 enum {
     EXCP_NONE,
     EXCP_HALT,
-    EXCP_IIMAIL,
+    EXCP_II0,
     EXCP_OPCDEC,
     EXCP_CALL_SYS,
     EXCP_ARITH,

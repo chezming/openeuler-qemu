@@ -268,7 +268,7 @@ void sw64_cpu_do_interrupt(CPUState *cs)
         i = 0x980;
         env->csr[EXC_PC] = env->pc;
         break;
-    case EXCP_IIMAIL:
+    case EXCP_II0:
         env->csr[EXC_PC] = env->pc;
         i = 0xE00;
         break;
@@ -298,12 +298,12 @@ bool sw64_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 	PCI_INT = PCIE_INT;
     }
 
-    if (interrupt_request & CPU_INTERRUPT_IIMAIL) {
-        idx = EXCP_IIMAIL;
+    if (interrupt_request & CPU_INTERRUPT_II0) {
+        idx = EXCP_II0;
         env->csr[INT_STAT] |= 1UL << 6;
         if ((env->csr[IER] & env->csr[INT_STAT]) == 0)
             return false;
-        cs->interrupt_request &= ~CPU_INTERRUPT_IIMAIL;
+        cs->interrupt_request &= ~CPU_INTERRUPT_II0;
         goto done;
     }
 
