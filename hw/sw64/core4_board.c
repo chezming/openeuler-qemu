@@ -16,7 +16,6 @@
 #include "hw/ide/ahci.h"
 #include "sysemu/numa.h"
 #include "sysemu/kvm.h"
-#include "hw/rtc/sun4v-rtc.h"
 #include "hw/pci/msi.h"
 #include "hw/sw64/sw64_iommu.h"
 
@@ -201,12 +200,40 @@ static const MemoryRegionOps intpu_ops = {
         },
 };
 
+static uint64_t rtc_read(void *opaque, hwaddr addr, unsigned size)
+{
+    uint64_t val = get_clock_realtime() / NANOSECONDS_PER_SECOND;
+    return val;
+}
+
+static void rtc_write(void *opaque, hwaddr addr, uint64_t val,
+		      unsigned size)
+{
+}
+
+static const MemoryRegionOps rtc_ops = {
+    .read = rtc_read,
+    .write = rtc_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid =
+        {
+            .min_access_size = 1,
+            .max_access_size = 8,
+        },
+    .impl =
+        {
+            .min_access_size = 1,
+            .max_access_size = 8,
+        },
+};
+
 static uint64_t ignore_read(void *opaque, hwaddr addr, unsigned size)
 {
     return 1;
 }
 
-static void ignore_write(void *opaque, hwaddr addr, uint64_t v, unsigned size)
+static void ignore_write(void *opaque, hwaddr addr, uint64_t v,
+		         unsigned size)
 {
 }
 
@@ -331,6 +358,7 @@ void core4_board_init(SW64CPU *cpus[MAX_CPUS], MemoryRegion *ram)
     MemoryRegion *io_piu0 = g_new(MemoryRegion, 1);
     MemoryRegion *conf_piu0 = g_new(MemoryRegion, 1);
     MemoryRegion *io_ep = g_new(MemoryRegion, 1);
+    MemoryRegion *io_rtc = g_new(MemoryRegion, 1);
     MachineState *ms = MACHINE(qdev_get_machine());
     unsigned int smp_cpus = ms->smp.cpus;
     PCIBus *b;
@@ -389,6 +417,10 @@ void core4_board_init(SW64CPU *cpus[MAX_CPUS], MemoryRegion *ram)
                           "pci0-ep-conf-io", 4 * GB);
     memory_region_add_subregion(get_system_memory(), 0x880600000000ULL,
                                 conf_piu0);
+    memory_region_init_io(io_rtc, OBJECT(bs), &rtc_ops, b,
+		          "sw64-rtc", 0x08ULL);
+    memory_region_add_subregion(get_system_memory(), 0x804910000000ULL,
+                                io_rtc);
     for (i = 0; i < nb_nics; i++)
         pci_nic_init_nofail(&nd_table[i], b, "e1000", NULL);
 
@@ -409,7 +441,6 @@ void core4_board_init(SW64CPU *cpus[MAX_CPUS], MemoryRegion *ram)
     }
 
     pci_create_simple(phb->bus, -1, "nec-usb-xhci");
-    sun4v_rtc_init(0x804910000000ULL);
 }
 
 static const TypeInfo swboard_pcihost_info = {
