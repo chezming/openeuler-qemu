@@ -415,7 +415,9 @@ void cpu_sw64_store_fpcr(CPUSW64State* env, uint64_t val) {
 uint64_t helper_read_csr(CPUSW64State *env, uint64_t index)
 {
     if (index == C3_PRI_BASE)
-        return 0x10000;
+        env->csr[index] = 0x10000;
+    if (index == SHTCLOCK)
+        env->csr[index] = qemu_clock_get_ns(QEMU_CLOCK_HOST) / 40;
     return env->csr[index];
 }
 
@@ -442,17 +444,21 @@ void helper_write_csr(CPUSW64State *env, uint64_t index, uint64_t va)
         tlb_flush(cs);
     }
 //core3
-    if (index == C3_INT_CLR || index == INT_PCI_INT) {
+    if (index == C3_INT_CLR) {
         env->csr[C3_INT_STAT] &= ~va;
     }
-//core4
-    if (index == C4_INT_CLR ) {
-        env->csr[C4_INT_STAT] &= ~va;
+    if ((index == C3_TIMER_CTL) && (va == 1)) {
+        timer_mod(cpu->alarm_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + env->csr[C3_TIMER_TH]);
     }
 
-    if (index == TIMER_CTL && env->csr[index] == 1) {
-	timer_mod(cpu->alarm_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 1000000000 / 250);
+//core4
+    if (index == C4_INT_CLR) {
+        env->csr[C4_INT_STAT] &= ~va;
     }
+    if ((index == C4_TIMER_CTL) && (va == 1)) {
+        timer_mod(cpu->alarm_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + env->csr[C4_TIMER_TH]);
+    }
+
 #endif
 }
 

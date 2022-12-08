@@ -285,7 +285,8 @@ enum {
 /* core3 csr */
         SWCSR(C3_PTBR,          0x8),
         SWCSR(C3_PRI_BASE,      0x10),
-        SWCSR(TIMER_CTL,        0x2a),
+        SWCSR(C3_TIMER_CTL,     0x2a),
+        SWCSR(C3_TIMER_TH,      0x2b),
         SWCSR(C3_INT_STAT,      0x30),
         SWCSR(C3_INT_CLR,       0x31),
         SWCSR(C3_IER,           0x32),
@@ -296,10 +297,13 @@ enum {
         SWCSR(C4_INT_STAT,      0x1b),
         SWCSR(C4_INT_CLR,       0x1c),
         SWCSR(PCIE_INT,         0x21),
+        SWCSR(C4_TIMER_TH,      0x23),
+        SWCSR(C4_TIMER_CTL,     0x24),
         SWCSR(C4_DVA,           0x54),
         SWCSR(C4_PTBR_SYS,      0x68),
         SWCSR(C4_PTBR_USR,      0x69),
         SWCSR(SOFT_CID,         0xc9),
+        SWCSR(SHTCLOCK,         0xca),
 };
 
 #include "exec/cpu-all.h"

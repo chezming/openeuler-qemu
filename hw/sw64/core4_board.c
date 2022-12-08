@@ -49,13 +49,11 @@ static void swboard_alarm_timer(void *opaque)
 {
     TimerState *ts = (TimerState *)((uintptr_t)opaque);
     BoardState *bs = (BoardState *)((uintptr_t)ts->opaque);
-    int64_t current_time;
+    SW64CPU *cpu;
+    int val = ts->order;
+    cpu = bs->sboard.cpu[val];
 
-    int cpu = ts->order;
-
-    current_time = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
-    cpu_interrupt(CPU(bs->sboard.cpu[cpu]), CPU_INTERRUPT_TIMER);
-    timer_mod(bs->sboard.cpu[cpu]->alarm_timer, bs->expire_time + current_time);
+    cpu_interrupt(CPU(cpu), CPU_INTERRUPT_TIMER);
 }
 #endif
 
@@ -103,10 +101,6 @@ static uint64_t mcu_read(void *opaque, hwaddr addr, unsigned size)
 	/* CPUID */
         ret = 0;
         break;
-    case 0x1180:
-	/* LONGTIME */
-        ret = qemu_clock_get_ns(QEMU_CLOCK_HOST) / 80;
-	break;
     case 0x4900:
         /* MC_CONFIG */
         break;
@@ -168,14 +162,6 @@ static const MemoryRegionOps mcu_ops = {
 static uint64_t intpu_read(void *opaque, hwaddr addr, unsigned size)
 {
     uint64_t ret = 0;
-#ifndef CONFIG_KVM
-    switch (addr) {
-    case 0x180:
-        /* LONGTIME */
-        ret = qemu_clock_get_ns(QEMU_CLOCK_HOST) / 80;
-        break;
-    }
-#endif
     return ret;
 }
 
@@ -362,9 +348,6 @@ void core4_board_init(SW64CPU *cpus[MAX_CPUS], MemoryRegion *ram)
         msi_nonbroken = true;
 #endif
 
-#ifndef CONFIG_KVM
-    bs->expire_time = (int64_t) (1000000000 / 250);
-#endif
     for (i = 0; i < smp_cpus; ++i) {
         if (cpus[i] == NULL)
 	    continue;
@@ -374,7 +357,6 @@ void core4_board_init(SW64CPU *cpus[MAX_CPUS], MemoryRegion *ram)
         ts->opaque = (void *) ((uintptr_t)bs);
         ts->order = i;
         cpus[i]->alarm_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, &swboard_alarm_timer, ts);
-	timer_mod(cpus[i]->alarm_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + bs->expire_time);
 #endif
     }
     memory_region_add_subregion(get_system_memory(), 0, ram);
