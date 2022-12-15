@@ -440,7 +440,7 @@ void helper_write_csr(CPUSW64State *env, uint64_t index, uint64_t va)
         (index == DTB_IU) || (index == DTB_IS) || (index == ITB_IA) ||
         (index == ITB_IV) || (index == ITB_IVP) || (index == ITB_IU) ||
         (index == ITB_IS) || (index == C3_PTBR) || (index == C4_PTBR_SYS)
-        || (index == C4_PTBR_USR)) {
+        || (index == C4_PTBR_USR) || (index == UPCR) || (index == DTB_UPCR)) {
         tlb_flush(cs);
     }
 //core3

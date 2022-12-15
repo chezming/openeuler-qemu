@@ -293,6 +293,7 @@ enum {
         SWCSR(INT_PCI_INT,      0x33),
         SWCSR(C3_DVA,           0x4e),
 /* core4 csr */
+        SWCSR(UPCR,             0x15),
         SWCSR(INT_EN,           0x1a),
         SWCSR(C4_INT_STAT,      0x1b),
         SWCSR(C4_INT_CLR,       0x1c),
@@ -300,6 +301,7 @@ enum {
         SWCSR(C4_TIMER_TH,      0x23),
         SWCSR(C4_TIMER_CTL,     0x24),
         SWCSR(C4_DVA,           0x54),
+        SWCSR(DTB_UPCR,         0x58),
         SWCSR(C4_PTBR_SYS,      0x68),
         SWCSR(C4_PTBR_USR,      0x69),
         SWCSR(SOFT_CID,         0xc9),
