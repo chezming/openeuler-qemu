@@ -137,7 +137,7 @@ struct SW64CPU {
     CPUSW64State env;
 
     uint64_t k_regs[158];
-    uint64_t k_vcb[36];
+    uint64_t k_vcb[48];
     QEMUTimer *alarm_timer;
     target_ulong irq;
     uint32_t cid;

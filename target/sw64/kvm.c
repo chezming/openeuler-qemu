@@ -25,7 +25,7 @@
 #include "hw/boards.h"
 #include "qemu/log.h"
 
-#define  init_pc  0xffffffff80011000
+#define  init_pc  0xffffffff80011100
 const KVMCapabilityInfo kvm_arch_required_capabilities[] = {
     KVM_CAP_LAST_INFO
 };
