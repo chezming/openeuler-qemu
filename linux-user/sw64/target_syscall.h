@@ -23,11 +23,11 @@ struct target_pt_regs {
     abi_ulong r27;
     abi_ulong r28;
     abi_ulong hae;
-/* JRP - These are the values provided to a0-a2 by HMcode */
+/* JRP - These are the values provided to a0-a2 by hmcode */
     abi_ulong trap_a0;
     abi_ulong trap_a1;
     abi_ulong trap_a2;
-/* These are saved by HMcode: */
+/* These are saved by hmcode: */
     abi_ulong ps;
     abi_ulong pc;
     abi_ulong gp;

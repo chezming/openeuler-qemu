@@ -66,7 +66,7 @@ extern const unsigned sw64_num_opcodes;
 #define SW_OPCODE_CORE4    	0x0004  /* Core4 private insns. */
 #define SW_LITOP(i)		(((i) >> 26) & 0x3D)
 
-#define SW_OPCODE_NOHM        (~(SW_OPCODE_BASE|SW_OPCODE_CORE3))
+#define SW_OPCODE_NOHMCODE        (~(SW_OPCODE_BASE|SW_OPCODE_CORE3|SW_OPCODE_CORE4))
 
 /* A macro to extract the major opcode from an instruction. */
 #define SW_OP(i)               (((i) >> 26) & 0x3F)
@@ -1229,7 +1229,7 @@ int print_insn_sw64(bfd_vma memaddr, struct disassemble_info *info)
         regnames = vms_regnames;
     else
         regnames = osf_regnames;
-    isa_mask = SW_OPCODE_NOHM;
+    isa_mask = SW_OPCODE_NOHMCODE;
     switch (info->mach) {
         case bfd_mach_sw64_core3:
             isa_mask |= SW_OPCODE_BASE | SW_OPCODE_CORE3;

@@ -87,7 +87,7 @@ static void core4_init(MachineState *machine)
     }
     g_free(hmcode_filename);
 
-    /* Start all cpus at the PALcode RESET entry point.  */
+    /* Start all cpus at the hmcode RESET entry point.  */
     for (i = 0; i < machine->smp.cpus; ++i) {
         cpus[i]->env.pc = hmcode_entry;
         cpus[i]->env.hm_entry = hmcode_entry;
