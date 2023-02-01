@@ -154,7 +154,15 @@ static void core3_init(MachineState *machine)
 
     if (!kernel_filename) {
 	uefi_filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, "uefi-bios-sw");
-	load_image_targphys(uefi_filename, 0x2f00000UL, -1);
+	if (uefi_filename == NULL) {
+	    error_report("no virtual bios provided");
+	    exit(1);
+	}
+	size = load_image_targphys(uefi_filename, 0x2f00000UL, -1);
+	if (size < 0) {
+	    error_report("could not load virtual bios: '%s'", uefi_filename);
+	    exit(1);
+	}
 	g_free(uefi_filename);
     } else {
 	/* Load a kernel.  */
