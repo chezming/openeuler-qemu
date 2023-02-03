@@ -152,32 +152,33 @@ int kvm_arch_get_registers(CPUState *cs)
 
 int kvm_arch_put_registers(CPUState *cs, int level)
 {
-    int ret, i;
+    int ret;
     SW64CPU *cpu = SW64_CPU(cs);
     struct vcpucb *vcb;
-    CPUSW64State *env = &cpu->env;
 
-    for (i = 0; i < 16; i++)
-	cpu->k_regs[i] = env->ir[i];
+    if (level == KVM_PUT_RUNTIME_STATE) {
+	int i;
+	CPUSW64State *env = &cpu->env;
 
-    for (i = 19; i < 29; i++)
-	cpu->k_regs[i-3] = env->ir[i];
+	for (i = 0; i < 16; i++)
+	    cpu->k_regs[i] = env->ir[i];
 
-    cpu->k_regs[155] = env->ir[16];
-    cpu->k_regs[156] = env->ir[17];
-    cpu->k_regs[157] = env->ir[18];
+	for (i = 19; i < 29; i++)
+	    cpu->k_regs[i-3] = env->ir[i];
 
-    cpu->k_regs[154] = env->ir[29];
+	cpu->k_regs[155] = env->ir[16];
+	cpu->k_regs[156] = env->ir[17];
+	cpu->k_regs[157] = env->ir[18];
 
-    if (cpu->k_regs[152] >> 3)
-	cpu->k_vcb[3] = env->ir[30];	//usp
-    else
-	cpu->k_vcb[2] = env->ir[30];	//ksp
+	cpu->k_regs[154] = env->ir[29];
 
-    if (level == KVM_PUT_RESET_STATE)
-	cpu->k_regs[153] = init_pc;
-    else
+	if (cpu->k_regs[152] >> 3)
+	    cpu->k_vcb[3] = env->ir[30];	//usp
+	else
+	    cpu->k_vcb[2] = env->ir[30];	//ksp
+
 	cpu->k_regs[153] = env->pc;
+    }
 
     ret = kvm_vcpu_ioctl(cs, KVM_SET_REGS, &cpu->k_regs);
     if (ret < 0)
