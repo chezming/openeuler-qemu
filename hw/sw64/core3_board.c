@@ -16,6 +16,7 @@
 #include "hw/ide/ahci.h"
 #include "sysemu/numa.h"
 #include "sysemu/kvm.h"
+#include "sysemu/cpus.h"
 #include "hw/pci/msi.h"
 #include "hw/sw64/sw64_iommu.h"
 #include "hw/loader.h"
@@ -24,6 +25,12 @@
 #define TYPE_SWBOARD_PCI_HOST_BRIDGE "core_board-pcihost"
 #define SWBOARD_PCI_HOST_BRIDGE(obj) \
     OBJECT_CHECK(BoardState, (obj), TYPE_SWBOARD_PCI_HOST_BRIDGE)
+
+#define CORE3_MAX_CPUS_MASK		0x3ff
+#define CORE3_CORES_SHIFT		10
+#define CORE3_CORES_MASK		0x3ff
+#define CORE3_THREADS_SHIFT		20
+#define CORE3_THREADS_MASK		0xfff
 
 #define MAX_IDE_BUS 2
 #define SW_PIN_TO_IRQ 16
@@ -93,6 +100,9 @@ static uint64_t mcu_read(void *opaque, hwaddr addr, unsigned size)
 {
     MachineState *ms = MACHINE(qdev_get_machine());
     unsigned int smp_cpus = ms->smp.cpus;
+    unsigned int smp_threads = ms->smp.threads;
+    unsigned int smp_cores = ms->smp.cores;
+    unsigned int max_cpus = ms->smp.max_cpus;
     uint64_t ret = 0;
     switch (addr) {
     case 0x0000:
@@ -103,6 +113,14 @@ static uint64_t mcu_read(void *opaque, hwaddr addr, unsigned size)
                 ret |= (1UL << i);
         }
         break;
+    case 0x0080:
+    /* SMP_INFO */
+	{
+	    ret = (smp_threads & CORE3_THREADS_MASK) << CORE3_THREADS_SHIFT;
+	    ret += (smp_cores & CORE3_CORES_MASK) << CORE3_CORES_SHIFT;
+	    ret += max_cpus & CORE3_MAX_CPUS_MASK;
+	}
+	break;
     /*IO_START*/
     case 0x1300:
         ret = 0x1;
