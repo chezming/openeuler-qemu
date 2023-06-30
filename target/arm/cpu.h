@@ -912,7 +912,8 @@ struct ARMCPU {
      * QEMU_KVM_ARM_TARGET_NONE if the kernel doesn't support this CPU type.
      */
     uint32_t kvm_target;
-
+    
+#ifdef CONFIG_KVM
     /* KVM init features for this CPU */
     uint32_t kvm_init_features[7];
 
@@ -925,7 +926,7 @@ struct ARMCPU {
 
     /* KVM steal time */
     OnOffAuto kvm_steal_time;
-
+#endif /* CONFIG_KVM */
     /* Uniprocessor system with MP extensions */
     bool mp_is_up;
 
