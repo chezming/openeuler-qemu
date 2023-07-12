@@ -700,7 +700,6 @@ static Property arm_cpu_pauth_impdef_property =
 
 static void aarch64_max_ft2000plus_initfn(Object *obj)
 {
-    ARMCPU *cpu = ARM_CPU(obj);
 
     if (kvm_enabled()) {
         kvm_arm_set_cpu_features_from_host(cpu);
@@ -708,7 +707,33 @@ static void aarch64_max_ft2000plus_initfn(Object *obj)
     } else {
         aarch64_a72_initfn(obj);
         cpu->midr = 0x70186622;
+        uint64_t t;
+        aarch64_a57_initfn(obj);
+
+        /*
+         * Reset MIDR so the guest doesn't mistake our 'max' CPU type for a real
+         * one and try to apply errata workarounds or use impdef features we
+         * don't provide.
+         * An IMPLEMENTER field of 0 means "reserved for software use";
+         * ARCHITECTURE must be 0xf indicating
+         * "v7 or later, check ID registers to see which features are present";
+         * the VARIANT, PARTNUM and REVISION fields are all implementation
+         * defined and we choose to define PARTNUM just in case guest
+         * code needs to distinguish this QEMU CPU from other software
+         * implementations, though this shouldn't be needed.
+         */
+        t = FIELD_DP64(0, MIDR_EL1, IMPLEMENTER, 0x70);
+        t = FIELD_DP64(t, MIDR_EL1, ARCHITECTURE, 0xf);
+        t = FIELD_DP64(t, MIDR_EL1, PARTNUM, 0x662);
+        t = FIELD_DP64(t, MIDR_EL1, VARIANT, 0x1);
+        t = FIELD_DP64(t, MIDR_EL1, REVISION, 2);
+        cpu->midr = t;
     }
+
+    aarch64_add_sve_properties(obj);
+    object_property_add(obj, "sve-max-vq", "uint32", cpu_max_get_sve_max_vq,
+                        cpu_max_set_sve_max_vq, NULL, NULL);
+
 }
 
 static void aarch64_max_tengyun_s2500_initfn(Object *obj)
@@ -717,11 +742,33 @@ static void aarch64_max_tengyun_s2500_initfn(Object *obj)
 
     if (kvm_enabled()) {
         kvm_arm_set_cpu_features_from_host(cpu);
-        kvm_arm_add_vcpu_properties(obj);
     } else {
-        aarch64_a72_initfn(obj);
-        cpu->midr = 0x70186632;
+        uint64_t t;
+        aarch64_a57_initfn(obj);
+
+        /*
+         * Reset MIDR so the guest doesn't mistake our 'max' CPU type for a real
+         * one and try to apply errata workarounds or use impdef features we
+         * don't provide.
+         * An IMPLEMENTER field of 0 means "reserved for software use";
+         * ARCHITECTURE must be 0xf indicating
+         * "v7 or later, check ID registers to see which features are present";
+         * the VARIANT, PARTNUM and REVISION fields are all implementation
+         * defined and we choose to define PARTNUM just in case guest
+         * code needs to distinguish this QEMU CPU from other software
+         * implementations, though this shouldn't be needed.
+         */
+        t = FIELD_DP64(0, MIDR_EL1, IMPLEMENTER, 0x70);
+        t = FIELD_DP64(t, MIDR_EL1, ARCHITECTURE, 0xf);
+        t = FIELD_DP64(t, MIDR_EL1, PARTNUM, 0x663);
+        t = FIELD_DP64(t, MIDR_EL1, VARIANT, 0x1);
+        t = FIELD_DP64(t, MIDR_EL1, REVISION, 3);
+        cpu->midr = t;
     }
+
+    aarch64_add_sve_properties(obj);
+    object_property_add(obj, "sve-max-vq", "uint32", cpu_max_get_sve_max_vq,
+                        cpu_max_set_sve_max_vq, NULL, NULL);
 }
 
 /* -cpu max: if KVM is enabled, like -cpu host (best possible with this host);
