@@ -703,7 +703,6 @@ static void aarch64_max_ft2000plus_initfn(Object *obj)
 
     if (kvm_enabled()) {
         kvm_arm_set_cpu_features_from_host(cpu);
-        kvm_arm_add_vcpu_properties(obj);
     } else {
         uint64_t t;
         aarch64_a57_initfn(obj);
