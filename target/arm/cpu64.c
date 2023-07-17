@@ -705,8 +705,6 @@ static void aarch64_max_ft2000plus_initfn(Object *obj)
         kvm_arm_set_cpu_features_from_host(cpu);
         kvm_arm_add_vcpu_properties(obj);
     } else {
-        aarch64_a72_initfn(obj);
-        cpu->midr = 0x70186622;
         uint64_t t;
         aarch64_a57_initfn(obj);
 
