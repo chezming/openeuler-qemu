@@ -144,6 +144,31 @@ static bool is_id_reg(const ARMCPRegInfo *ri)
            ri->crm > 0 && ri->crm < 8;
 }
 
+bool is_readonly_reg(const ARMCPRegInfo *ri)
+{
+    if (ri->opc0 == 3) {
+        if (ri->opc1 == 0 && ri->crn == 0 && ri->crm == 0 &&
+           (ri->opc2 == 0 || ri->opc2 == 5 ||
+            ri->opc2 == 6)) {
+            return true;
+        } else if (ri->opc1 == 0 && ri->crn == 12 && ri->crm == 1 &&
+                  ri->opc2 == 0) {
+            return true;
+        } else if (ri->opc1 == 1 && ri->crn == 0 && ri->crm == 0 &&
+                (ri->opc2 == 0 || ri->opc2 == 1 ||
+                ri->opc2 == 7)) {
+            return true;
+        } else if (ri->opc1 == 3 && ri->crn == 0 && ri->crm == 0 &&
+                (ri->opc2 == 1 || ri->opc2 == 7)) {
+            return true;
+        } else if (ri->opc1 == 6 && ri->crn == 12 && ri->crm == 0 &&
+                 ri->opc2 == 1) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool write_cpustate_to_list(ARMCPU *cpu, bool kvm_sync)
 {
     /* Write the coprocessor state from cpu->env to the (index,value) list. */

@@ -165,6 +165,19 @@ void kvm_arm_destroy_scratch_host_vcpu(int *fdarray)
     }
 }
 
+void kvm_arm_set_cpu_kvm_target_from_host(ARMCPU *cpu)
+{
+    if (!arm_host_cpu_features.dtb_compatible) {
+        if (!kvm_enabled() ||
+            !kvm_arm_get_host_cpu_features(&arm_host_cpu_features)) {
+            cpu->kvm_target = QEMU_KVM_ARM_TARGET_NONE;
+            cpu->host_cpu_probe_failed = true;
+            return;
+        }
+    }
+    cpu->kvm_target = arm_host_cpu_features.target;
+}
+
 void kvm_arm_set_cpu_features_from_host(ARMCPU *cpu)
 {
     CPUARMState *env = &cpu->env;
@@ -215,19 +228,23 @@ void kvm_arm_add_vcpu_properties(Object *obj)
 
     if (arm_feature(env, ARM_FEATURE_GENERIC_TIMER)) {
         cpu->kvm_adjvtime = true;
-        object_property_add_bool(obj, "kvm-no-adjvtime", kvm_no_adjvtime_get,
-                                 kvm_no_adjvtime_set);
-        object_property_set_description(obj, "kvm-no-adjvtime",
-                                        "Set on to disable the adjustment of "
-                                        "the virtual counter. VM stopped time "
-                                        "will be counted.");
+        if (object_property_find(obj, "kvm-no-adjvtime") == NULL) {
+            object_property_add_bool(obj, "kvm-no-adjvtime",
+                                     kvm_no_adjvtime_get,
+                                     kvm_no_adjvtime_set);
+            object_property_set_description(obj, "kvm-no-adjvtime",
+                                            "Set on to disable the adjustment "
+                                            "of the virtual counter. VM "
+                                            "stopped time will be counted.");
+        }
     }
-
-    cpu->kvm_steal_time = ON_OFF_AUTO_AUTO;
-    object_property_add_bool(obj, "kvm-steal-time", kvm_steal_time_get,
-                             kvm_steal_time_set);
-    object_property_set_description(obj, "kvm-steal-time",
-                                    "Set off to disable KVM steal time.");
+    if (object_property_find(obj, "kvm-steal-time") == NULL) {
+        cpu->kvm_steal_time = ON_OFF_AUTO_AUTO;
+        object_property_add_bool(obj, "kvm-steal-time", kvm_steal_time_get,
+                                 kvm_steal_time_set);
+        object_property_set_description(obj, "kvm-steal-time",
+                                        "Set off to disable KVM steal time.");
+    }
 }
 
 bool kvm_arm_pmu_supported(void)
@@ -622,7 +639,39 @@ bool write_list_to_kvmstate(ARMCPU *cpu, int level)
              * "you tried to set a register which is constant with
              * a different value from what it actually contains".
              */
-            ok = false;
+            const ARMCPRegInfo *ri;
+            uint32_t cpreg_idx = kvm_to_cpreg_id(regidx);
+            ri = get_arm_cp_reginfo(cpu->cp_regs, cpreg_idx);
+            if (ri != NULL) {
+                if (is_readonly_reg(ri)) {
+                    fprintf(stderr, "%s: failed to set register:%s (%lx) "
+                                    "to (%llx) %d/%s, since reg is readonly\n",
+                            __func__, ri->name, regidx, r.addr, ret,
+                            strerror(-ret));
+                    continue;
+                } else {
+                    fprintf(stderr, "%s: failed to set register:%s (%lx) "
+                                    "to (%llx) %d/%s, which is a RW register "
+                                    "but is unknown on this host cpu\n",
+                            __func__, ri->name, regidx, r.addr, ret,
+                            strerror(-ret));
+                    ok = false;
+                }
+            } else {
+                /* TODO Check these regs whether can be skipped */
+                if ((regidx >= 0x6020000000110000 &&
+                     regidx <= 0x6020000000110002)
+                     || regidx == 0x6030000000140001
+                     || regidx == 0x6030000000140002) {
+                    fprintf(stderr, "skip 0x%lx : %u %xu\n", regidx,
+                            cpreg_idx, cpreg_idx);
+                    continue;
+                }
+                fprintf(stderr, "ri is NULL, and ri is not valid, "
+                                "regidx=(%lx)\n", regidx);
+                ok = false;
+                break;
+            }
         }
     }
     return ok;

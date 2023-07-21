@@ -91,6 +91,19 @@ static const ARMCPRegInfo cortex_a72_a57_a53_cp_reginfo[] = {
     REGINFO_SENTINEL
 };
 
+static void check_kvm_feature_support_setting(ARMCPU *cpu)
+{
+    if (kvm_enabled()) {
+        if (!kvm_arm_cpu_feature_supported()) {
+            error_setg(&error_abort, "KVM doesn't support to set CPU feature"
+                                     " in arm. Error setting custom cpu with"
+                                     " kvm.");
+            return;
+        }
+        kvm_arm_set_cpu_kvm_target_from_host(cpu);
+    }
+}
+
 static void aarch64_a57_initfn(Object *obj)
 {
     ARMCPU *cpu = ARM_CPU(obj);
@@ -105,6 +118,7 @@ static void aarch64_a57_initfn(Object *obj)
     set_feature(&cpu->env, ARM_FEATURE_EL3);
     set_feature(&cpu->env, ARM_FEATURE_PMU);
     cpu->kvm_target = QEMU_KVM_ARM_TARGET_CORTEX_A57;
+    check_kvm_feature_support_setting(cpu);
     cpu->midr = 0x411fd070;
     cpu->revidr = 0x00000000;
     cpu->reset_fpsid = 0x41034070;
@@ -158,6 +172,7 @@ static void aarch64_a53_initfn(Object *obj)
     set_feature(&cpu->env, ARM_FEATURE_EL3);
     set_feature(&cpu->env, ARM_FEATURE_PMU);
     cpu->kvm_target = QEMU_KVM_ARM_TARGET_CORTEX_A53;
+    check_kvm_feature_support_setting(cpu);
     cpu->midr = 0x410fd034;
     cpu->revidr = 0x00000000;
     cpu->reset_fpsid = 0x41034070;
@@ -203,6 +218,7 @@ static void aarch64_a72_initfn(Object *obj)
 
     cpu->dtb_compatible = "arm,cortex-a72";
     cpu->kvm_target = QEMU_KVM_ARM_TARGET_GENERIC_V8;
+    check_kvm_feature_support_setting(cpu);
     set_feature(&cpu->env, ARM_FEATURE_V8);
     set_feature(&cpu->env, ARM_FEATURE_NEON);
     set_feature(&cpu->env, ARM_FEATURE_GENERIC_TIMER);
@@ -702,26 +718,77 @@ static void aarch64_max_ft2000plus_initfn(Object *obj)
 {
     ARMCPU *cpu = ARM_CPU(obj);
 
-    if (kvm_enabled()) {
-        kvm_arm_set_cpu_features_from_host(cpu);
-        kvm_arm_add_vcpu_properties(obj);
-    } else {
-        aarch64_a72_initfn(obj);
-        cpu->midr = 0x70186622;
-    }
+    aarch64_a72_initfn(obj);
+
+    cpu->midr = 0x70186622;
+
+    /*
+     * Disable atomics asimddp asimdfhm asimdrdm fphp
+     * jscvt fcma dcpop asimdhp aes pmull sha1 sha2 crc32
+     */
+    uint64_t t;
+    t = cpu->isar.regs[ID_AA64ISAR0];
+    t = FIELD_DP64(t, ID_AA64ISAR0, ATOMIC, 0);
+    t = FIELD_DP64(t, ID_AA64ISAR0, DP, 0);
+    t = FIELD_DP64(t, ID_AA64ISAR0, FHM, 0);
+    t = FIELD_DP64(t, ID_AA64ISAR0, RDM, 0);
+    cpu->isar.regs[ID_AA64ISAR0] = t;
+
+    t = cpu->isar.regs[ID_AA64PFR0];
+    t = FIELD_DP64(t, ID_AA64PFR0, FP, 0);
+    cpu->isar.regs[ID_AA64PFR0] = t;
+
+    t = cpu->isar.regs[ID_AA64ISAR1];
+    t = FIELD_DP64(t, ID_AA64ISAR1, JSCVT, 0);
+    t = FIELD_DP64(t, ID_AA64ISAR1, FCMA, 0);
+    t = FIELD_DP64(t, ID_AA64ISAR1, DPB, 0);
+    cpu->isar.regs[ID_AA64ISAR1] = t;
+
+    t = cpu->isar.regs[ID_AA64PFR0];
+    t = FIELD_DP64(t, ID_AA64PFR0, ADVSIMD, 0);
+    cpu->isar.regs[ID_AA64PFR0] = t;
+
+    t = FIELD_DP64(t, ID_AA64ISAR0, AES, 0);
+    t = FIELD_DP64(t, ID_AA64ISAR0, SHA1, 0);
+    t = FIELD_DP64(t, ID_AA64ISAR0, SHA2, 0);
+    t = FIELD_DP64(t, ID_AA64ISAR0, CRC32, 1);
+
+    cpu->isar.regs[ID_AA64ISAR0] = t;
 }
 
 static void aarch64_max_tengyun_s2500_initfn(Object *obj)
 {
     ARMCPU *cpu = ARM_CPU(obj);
 
-    if (kvm_enabled()) {
-        kvm_arm_set_cpu_features_from_host(cpu);
-        kvm_arm_add_vcpu_properties(obj);
-    } else {
-        aarch64_a72_initfn(obj);
-        cpu->midr = 0x70186632;
-    }
+    aarch64_a72_initfn(obj);
+
+    cpu->midr = 0x70186632;
+
+    /*
+     * Disable atomics asimddp asimdfhm asimdrdm fphp
+     * jscvt fcma dcpop asimdhp
+     */
+    uint64_t t;
+    t = cpu->isar.regs[ID_AA64ISAR0];
+    t = FIELD_DP64(t, ID_AA64ISAR0, ATOMIC, 0);
+    t = FIELD_DP64(t, ID_AA64ISAR0, DP, 0);
+    t = FIELD_DP64(t, ID_AA64ISAR0, FHM, 0);
+    t = FIELD_DP64(t, ID_AA64ISAR0, RDM, 0);
+    cpu->isar.regs[ID_AA64ISAR0] = t;
+
+    t = cpu->isar.regs[ID_AA64PFR0];
+    t = FIELD_DP64(t, ID_AA64PFR0, FP, 0);
+    cpu->isar.regs[ID_AA64PFR0] = t;
+
+    t = cpu->isar.regs[ID_AA64ISAR1];
+    t = FIELD_DP64(t, ID_AA64ISAR1, JSCVT, 0);
+    t = FIELD_DP64(t, ID_AA64ISAR1, FCMA, 0);
+    t = FIELD_DP64(t, ID_AA64ISAR1, DPB, 0);
+    cpu->isar.regs[ID_AA64ISAR1] = t;
+
+    t = cpu->isar.regs[ID_AA64PFR0];
+    t = FIELD_DP64(t, ID_AA64PFR0, ADVSIMD, 0);
+    cpu->isar.regs[ID_AA64PFR0] = t;
 }
 
 /* -cpu max: if KVM is enabled, like -cpu host (best possible with this host);
@@ -922,6 +989,7 @@ static void aarch64_a64fx_initfn(Object *obj)
     set_feature(&cpu->env, ARM_FEATURE_EL2);
     set_feature(&cpu->env, ARM_FEATURE_EL3);
     set_feature(&cpu->env, ARM_FEATURE_PMU);
+    check_kvm_feature_support_setting(cpu);
     cpu->midr = 0x461f0010;
     cpu->revidr = 0x00000000;
     cpu->ctr = 0x86668006;
@@ -958,14 +1026,14 @@ static void aarch64_a64fx_initfn(Object *obj)
 }
 
 static const ARMCPUInfo aarch64_cpus[] = {
-    { .name = "cortex-a57",         .initfn = aarch64_a57_initfn },
-    { .name = "cortex-a53",         .initfn = aarch64_a53_initfn },
-    { .name = "cortex-a72",         .initfn = aarch64_a72_initfn },
-    { .name = "Kunpeng-920",        .initfn = aarch64_kunpeng_920_initfn},
-    { .name = "FT-2000+",           .initfn = aarch64_max_ft2000plus_initfn },
-    { .name = "Tengyun-S2500",      .initfn = aarch64_max_tengyun_s2500_initfn },
-    { .name = "a64fx",              .initfn = aarch64_a64fx_initfn },
-    { .name = "max",                .initfn = aarch64_max_initfn },
+    { .name = "cortex-a57",      .initfn = aarch64_a57_initfn },
+    { .name = "cortex-a53",      .initfn = aarch64_a53_initfn },
+    { .name = "cortex-a72",      .initfn = aarch64_a72_initfn },
+    { .name = "Kunpeng-920",     .initfn = aarch64_kunpeng_920_initfn},
+    { .name = "FT-2000+",        .initfn = aarch64_max_ft2000plus_initfn },
+    { .name = "Tengyun-S2500",   .initfn = aarch64_max_tengyun_s2500_initfn },
+    { .name = "a64fx",           .initfn = aarch64_a64fx_initfn },
+    { .name = "max",             .initfn = aarch64_max_initfn },
 };
 
 static bool aarch64_cpu_get_aarch64(Object *obj, Error **errp)
