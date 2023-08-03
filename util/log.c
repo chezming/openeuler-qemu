@@ -51,6 +51,16 @@ int qemu_log(const char *fmt, ...)
     if (logfile) {
         va_list ap;
         va_start(ap, fmt);
+        GTimeVal tv;
+        gchar *timestr;
+
+        if (message_with_timestamp) {
+            g_get_current_time(&tv);
+            timestr = g_time_val_to_iso8601(&tv);
+            fprintf(logfile->fd, "%s ", timestr);
+            g_free(timestr);
+        }
+
         ret = vfprintf(logfile->fd, fmt, ap);
         va_end(ap);
 
