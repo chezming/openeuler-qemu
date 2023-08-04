@@ -2,8 +2,8 @@
 #define HW_SW64_SYS_H
 
 typedef struct boot_params {
-        unsigned long initrd_start;                     /* size of initrd */
         unsigned long initrd_size;                      /* logical address of initrd */
+        unsigned long initrd_start;                     /* size of initrd */
         unsigned long dtb_start;                        /* logical address of dtb */
         unsigned long efi_systab;                       /* logical address of EFI system table */
         unsigned long efi_memmap;                       /* logical address of EFI memory map */

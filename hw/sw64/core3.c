@@ -95,6 +95,7 @@ static void core3_init(MachineState *machine)
     long i, size;
     const char *kernel_filename = machine->kernel_filename;
     const char *kernel_cmdline = machine->kernel_cmdline;
+    const char *initrd_filename = machine->initrd_filename;
     char *hmcode_filename;
     char *uefi_filename;
     uint64_t hmcode_entry, hmcode_low, hmcode_high;
@@ -123,7 +124,6 @@ static void core3_init(MachineState *machine)
     pstrcpy_targphys("vm-uuid", VMUUID, 0x12, (char *)&(uuid_out_put));
     param_offset = 0x90B000UL;
     core3_boot_params->cmdline = param_offset | 0xfff0000000000000UL;
-    rom_add_blob_fixed("core3_boot_params", (core3_boot_params), 0x48, 0x90A100);
 
     hmcode_filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, kvm_enabled() ? "core3-reset":"core3-hmcode");
     if (hmcode_filename == NULL) {
@@ -176,6 +176,23 @@ static void core3_init(MachineState *machine)
 	cpus[0]->env.trap_arg1 = kernel_entry;
 	if (kernel_cmdline)
 	    pstrcpy_targphys("cmdline", param_offset, 0x400, kernel_cmdline);
+    }
+
+    if (initrd_filename) {
+        long initrd_base, initrd_size;
+
+        initrd_size = get_image_size(initrd_filename);
+        if (initrd_size < 0) {
+            error_report("could not load initial ram disk '%s'",
+                         initrd_filename);
+            exit(1);
+        }
+        // Put the initrd image as high in memory as possible.
+        initrd_base = 0x3000000UL;
+        load_image_targphys(initrd_filename, initrd_base, initrd_size);
+        core3_boot_params->initrd_start = initrd_base | 0xfff0000000000000UL;
+        core3_boot_params->initrd_size = initrd_size;
+        rom_add_blob_fixed("core3_boot_params", (core3_boot_params), 0x48, 0x90A100);
     }
 }
 
