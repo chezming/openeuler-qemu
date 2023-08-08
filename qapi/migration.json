@@ -689,6 +689,8 @@
 #                         at tail stage.
 #                         The default value is false. (Since 5.1)
 #
+# @cpr-exec-args: defined in a subsequent patch.
+#
 # @tls-creds: ID of the 'tls-creds' object that provides credentials for
 #             establishing a TLS connection over the migration data channel.
 #             On the outgoing side of the migration, the credentials must
@@ -792,6 +794,7 @@
            'compress-wait-thread', 'compress-method', 'throttle-trigger-threshold',
            'cpu-throttle-initial', 'cpu-throttle-increment',
            'cpu-throttle-tailslow',
+           'cpr-exec-args',
            'tls-creds', 'tls-hostname', 'tls-authz', 'max-bandwidth',
            'downtime-limit',
            { 'name': 'x-checkpoint-delay', 'features': [ 'unstable' ] },
@@ -860,6 +863,8 @@
 #                         meanwhile the throttle increment won't be excessive
 #                         at tail stage.
 #                         The default value is false. (Since 5.1)
+#
+# @cpr-exec-args: defined in a subsequent patch.
 #
 # @tls-creds: ID of the 'tls-creds' object that provides credentials
 #             for establishing a TLS connection over the migration data
@@ -973,6 +978,7 @@
             '*cpu-throttle-initial': 'uint8',
             '*cpu-throttle-increment': 'uint8',
             '*cpu-throttle-tailslow': 'bool',
+            '*cpr-exec-args': [ 'str' ],
             '*tls-creds': 'StrOrNull',
             '*tls-hostname': 'StrOrNull',
             '*tls-authz': 'StrOrNull',
@@ -1066,6 +1072,8 @@
 #                         meanwhile the throttle increment won't be excessive
 #                         at tail stage.
 #                         The default value is false. (Since 5.1)
+#
+# @cpr-exec-args: defined in a subsequent patch.
 #
 # @tls-creds: ID of the 'tls-creds' object that provides credentials
 #             for establishing a TLS connection over the migration data
@@ -1179,6 +1187,7 @@
             '*cpu-throttle-initial': 'uint8',
             '*cpu-throttle-increment': 'uint8',
             '*cpu-throttle-tailslow': 'bool',
+            '*cpr-exec-args': [ 'str' ],
             '*tls-creds': 'str',
             '*tls-hostname': 'str',
             '*tls-authz': 'str',
