@@ -851,6 +851,8 @@ MigrationParameters *qmp_query_migrate_parameters(Error **errp)
 
     /* TODO use QAPI_CLONE() instead of duplicating it inline */
     params = g_malloc0(sizeof(*params));
+    params->has_mode = true;
+    params->mode = s->parameters.mode;
     params->has_compress_level = true;
     params->compress_level = s->parameters.compress_level;
     params->has_compress_threads = true;
@@ -1507,6 +1509,10 @@ static void migrate_params_test_apply(MigrateSetParameters *params,
 
     /* TODO use QAPI_CLONE() instead of duplicating it inline */
 
+    if (params->has_mode) {
+        dest->mode = params->mode;
+    }
+
     if (params->has_compress_level) {
         dest->compress_level = params->compress_level;
     }
@@ -1607,6 +1613,10 @@ static void migrate_params_apply(MigrateSetParameters *params, Error **errp)
     MigrationState *s = migrate_get_current();
 
     /* TODO use QAPI_CLONE() instead of duplicating it inline */
+
+    if (params->has_mode) {
+        s->parameters.mode = params->mode;
+    }
 
     if (params->has_compress_level) {
         s->parameters.compress_level = params->compress_level;
@@ -2589,6 +2599,20 @@ int migrate_multifd_zstd_level(void)
     s = migrate_get_current();
 
     return s->parameters.multifd_zstd_level;
+}
+
+MigMode migrate_mode(void)
+{
+    MigrationState *s;
+
+    s = migrate_get_current();
+
+    return s->parameters.mode;
+}
+
+MigMode migrate_mode_of(MigrationState *s)
+{
+    return s->parameters.mode;
 }
 
 int migrate_use_xbzrle(void)
@@ -4202,6 +4226,9 @@ static Property migration_properties[] = {
                       clear_bitmap_shift, CLEAR_BITMAP_SHIFT_DEFAULT),
 
     /* Migration parameters */
+    DEFINE_PROP_MIG_MODE("mode", MigrationState,
+                      parameters.mode,
+                      MIG_MODE_NORMAL),
     DEFINE_PROP_UINT8("x-compress-level", MigrationState,
                       parameters.compress_level,
                       DEFAULT_MIGRATE_COMPRESS_LEVEL),
@@ -4329,6 +4356,7 @@ static void migration_instance_init(Object *obj)
     params->tls_creds = g_strdup("");
 
     /* Set has_* up only for parameter checks */
+    params->has_mode = true;
     params->has_compress_level = true;
     params->has_compress_threads = true;
     params->has_decompress_threads = true;
