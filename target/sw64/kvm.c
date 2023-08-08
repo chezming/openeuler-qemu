@@ -70,7 +70,6 @@ void kvm_sw64_reset_vcpu(SW64CPU *cpu)
     CPUState *cs = CPU(cpu);
     struct kvm_regs *regs;
     int ret;
-    struct vcpucb *vcb;
 
     regs = (struct kvm_regs *)cpu->k_regs;
     regs->pc = init_pc;
@@ -81,9 +80,6 @@ void kvm_sw64_reset_vcpu(SW64CPU *cpu)
         fprintf(stderr, "kvm_sw64_vcpu_init failed: %s\n", strerror(-ret));
         abort();
     }
-
-    vcb = (struct vcpucb *)cpu->k_vcb;
-    vcb->vcpu_irq_disabled = 1;
 
     ret = kvm_vcpu_ioctl(cs, KVM_SW64_VCPU_INIT, NULL);
 
@@ -154,7 +150,6 @@ int kvm_arch_put_registers(CPUState *cs, int level)
 {
     int ret;
     SW64CPU *cpu = SW64_CPU(cs);
-    struct vcpucb *vcb;
 
     if (level == KVM_PUT_RUNTIME_STATE) {
 	int i;
@@ -183,12 +178,8 @@ int kvm_arch_put_registers(CPUState *cs, int level)
     ret = kvm_vcpu_ioctl(cs, KVM_SET_REGS, &cpu->k_regs);
     if (ret < 0)
         return ret;
-    vcb = (struct vcpucb *)cpu->k_vcb;
-    vcb->whami = kvm_arch_vcpu_id(cs);
-    fprintf(stderr,"vcpu %ld init.\n", vcb->whami);
-
-    if (level == KVM_PUT_RESET_STATE)
-	vcb->pcbb = 0;
+    cpu->k_vcb[15] = kvm_arch_vcpu_id(cs);
+    fprintf(stderr,"vcpu %ld init.\n", cpu->k_vcb[15]);
 
     return kvm_vcpu_ioctl(cs, KVM_SW64_SET_VCB, &cpu->k_vcb);
 }
