@@ -68,6 +68,7 @@ static FWCfgState *sw_create_fw_cfg(hwaddr addr)
     return fw_cfg;
 }
 
+#ifdef CONFIG_KVM
 static void sw64_virt_build_smbios(BoardState *vms)
 {
     uint8_t *smbios_tables, *smbios_anchor;
@@ -98,6 +99,7 @@ static void sw64_virt_build_smbios(BoardState *vms)
                         smbios_anchor, smbios_anchor_len);
     }
 }
+#endif
 
 #ifndef CONFIG_KVM
 static void swboard_alarm_timer(void *opaque)
@@ -579,7 +581,9 @@ void core3_board_init(SW64CPU *cpus[MAX_CPUS], MemoryRegion *ram)
     pci_create_simple(phb->bus, -1, "nec-usb-xhci");
     bs->fw_cfg = sw_create_fw_cfg(SW_FW_CFG_P_BASE);
     rom_set_fw(bs->fw_cfg);
+#ifdef CONFIG_KVM
     sw64_virt_build_smbios(bs);
+#endif
 }
 
 static const TypeInfo swboard_pcihost_info = {
