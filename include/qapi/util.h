@@ -33,6 +33,12 @@ bool qapi_bool_parse(const char *name, const char *value, bool *obj,
 int parse_qapi_name(const char *name, bool complete);
 
 /*
+ * Produce and return a NULL-terminated array of strings from @args.
+ * All strings are g_strdup'd.
+ */
+GStrv strv_from_strList(const struct strList *args);
+
+/*
  * Produce a strList from the character delimited string @in.
  * All strings are g_strdup'd.
  * A NULL or empty input string returns NULL.
@@ -64,5 +70,18 @@ struct strList *strList_from_string(const char *in, char delim);
     (*(tail))->value = (element); \
     (tail) = &(*(tail))->next; \
 } while (0)
+
+/*
+ * For any GenericList @list, return its length.
+ */
+#define QAPI_LIST_LENGTH(list) \
+    ({ \
+        int len = 0; \
+        typeof(list) elem; \
+        for (elem = list; elem != NULL; elem = elem->next) { \
+            len++; \
+        } \
+        len; \
+    })
 
 #endif
