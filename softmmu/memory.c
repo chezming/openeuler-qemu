@@ -33,6 +33,7 @@
 #include "qemu/accel.h"
 #include "hw/boards.h"
 #include "migration/vmstate.h"
+#include "migration/cpr-state.h"
 
 //#define DEBUG_UNASSIGNED
 
@@ -1593,6 +1594,7 @@ void memory_region_init_ram_from_file(MemoryRegion *mr,
                                       bool readonly,
                                       Error **errp)
 {
+    int fd;
     Error *err = NULL;
     memory_region_init(mr, owner, name, size);
     mr->ram = true;
@@ -1600,8 +1602,21 @@ void memory_region_init_ram_from_file(MemoryRegion *mr,
     mr->terminates = true;
     mr->destructor = memory_region_destructor_ram;
     mr->align = align;
-    mr->ram_block = qemu_ram_alloc_from_file(size, mr, ram_flags, path,
-                                             readonly, &err);
+
+    /* make sure mr has a valid name */
+    memory_region_name(mr);
+    fd = cpr_find_fd(mr->name, 0);
+    if (fd < 0) {
+        mr->ram_block = qemu_ram_alloc_from_file(size, mr, ram_flags, path,
+                                                 readonly, &err);
+        if (mr->ram_block) {
+            fd = mr->ram_block->fd;
+            cpr_save_fd(mr->name, 0, fd);
+        }
+    } else {
+        mr->ram_block = qemu_ram_alloc_from_fd(size, mr, ram_flags, fd, 0,
+                                               readonly, &err);
+    }
     if (err) {
         mr->size = int128_zero();
         object_unparent(OBJECT(mr));
