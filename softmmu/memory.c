@@ -2537,7 +2537,7 @@ static void memory_region_add_subregion_common(MemoryRegion *mr,
 {
     assert(!subregion->container);
     subregion->container = mr;
-    subregion->addr = offset;
+    memory_region_set_address_only(subregion, offset);
     memory_region_update_container_subregions(subregion);
 }
 
@@ -2612,10 +2612,16 @@ static void memory_region_readd_subregion(MemoryRegion *mr)
     }
 }
 
+void memory_region_set_address_only(MemoryRegion *mr, hwaddr addr)
+{
+    mr->addr = addr;
+    mr->has_addr = true;
+}
+
 void memory_region_set_address(MemoryRegion *mr, hwaddr addr)
 {
     if (addr != mr->addr) {
-        mr->addr = addr;
+        memory_region_set_address_only(mr, addr);
         memory_region_readd_subregion(mr);
     }
 }
