@@ -33,6 +33,7 @@
 #include "hw/pci/pci_host.h"
 #include "hw/qdev-properties.h"
 #include "hw/qdev-properties-system.h"
+#include "migration/misc.h"
 #include "migration/qemu-file-types.h"
 #include "migration/vmstate.h"
 #include "monitor/monitor.h"
@@ -314,6 +315,17 @@ void pci_device_deassert_intx(PCIDevice *dev)
 static void pci_do_device_reset(PCIDevice *dev)
 {
     int r;
+
+    /*
+     * A PCI device that is resuming for cpr is already configured, so do
+     * not reset it here when we are called from qemu_system_reset prior to
+     * cpr load, else interrupts may be lost for vfio-pci devices.  It is
+     * safe to skip this reset for all PCI devices, because cpr load will set
+     * all fields that would have been set here.
+     */
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        return;
+    }
 
     pci_device_deassert_intx(dev);
     assert(dev->irq_state == 0);
