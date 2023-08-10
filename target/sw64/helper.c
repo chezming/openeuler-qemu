@@ -439,8 +439,9 @@ void helper_write_csr(CPUSW64State *env, uint64_t index, uint64_t va)
     if ((index == DTB_IA) || (index == DTB_IV) || (index == DTB_IVP) ||
         (index == DTB_IU) || (index == DTB_IS) || (index == ITB_IA) ||
         (index == ITB_IV) || (index == ITB_IVP) || (index == ITB_IU) ||
-        (index == ITB_IS) || (index == C3_PTBR) || (index == C4_PTBR_SYS)
-        || (index == C4_PTBR_USR) || (index == UPCR) || (index == DTB_UPCR)) {
+        (index == ITB_IS) || (index == C3_PTBR) || (index == C4_PTBR_SYS) ||
+        (index == C4_PTBR_USR) || (index == C3_UPCR) || (index == C3_DTB_PCR) ||
+        (index == C4_UPCR) || (index == C4_DTB_UPCR)) {
         tlb_flush(cs);
     }
 //core3
