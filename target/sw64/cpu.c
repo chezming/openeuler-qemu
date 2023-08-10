@@ -25,6 +25,8 @@
 #include "kvm_sw64.h"
 #include "sysemu/reset.h"
 #include "hw/qdev-properties.h"
+#include "sysemu/arch_init.h"
+#include "qapi/qapi-commands-machine-target.h"
 
 static void sw64_cpu_set_pc(CPUState *cs, vaddr value)
 {
@@ -146,6 +148,38 @@ void sw64_cpu_list(void)
     qemu_printf("Available CPUs:\n");
     g_slist_foreach(list, sw64_cpu_list_entry, NULL);
     g_slist_free(list);
+}
+
+static void sw64_cpu_add_definition(gpointer data, gpointer user_data)
+{
+    ObjectClass *oc = data;
+    CpuDefinitionInfoList **cpu_list = user_data;
+    CpuDefinitionInfoList *entry;
+    CpuDefinitionInfo *info;
+    const char *typename;
+
+    typename = object_class_get_name(oc);
+    info = g_malloc0(sizeof(*info));
+    info->name = g_strndup(typename,
+                           strlen(typename) - strlen("-" TYPE_SW64_CPU));
+    info->q_typename = g_strdup(typename);
+
+    entry = g_malloc0(sizeof(*entry));
+    entry->value = info;
+    entry->next = *cpu_list;
+    *cpu_list = entry;
+}
+
+CpuDefinitionInfoList *qmp_query_cpu_definitions(Error **errp)
+{
+    CpuDefinitionInfoList *cpu_list = NULL;
+    GSList *list;
+
+    list = object_class_get_list(TYPE_SW64_CPU, false);
+    g_slist_foreach(list, sw64_cpu_add_definition, &cpu_list);
+    g_slist_free(list);
+
+    return cpu_list;
 }
 
 static void sw64_cpu_disas_set_info(CPUState *cs, disassemble_info *info)
