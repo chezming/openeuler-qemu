@@ -1000,6 +1000,17 @@ void qemu_chr_set_feature(Chardev *chr,
     return set_bit(feature, chr->features);
 }
 
+bool qemu_chr_cpr_support(Chardev *chr)
+{
+    bool has_feature_cpr;
+
+    has_feature_cpr = qemu_chr_has_feature(chr, QEMU_CHAR_FEATURE_CPR);
+    if (chr->cpr_enabled || (has_feature_cpr && !chr->reopen_on_cpr))
+        return true;
+    else
+        return false;
+}
+
 static Chardev *chardev_new(const char *id, const char *typename,
                             ChardevBackend *backend,
                             GMainContext *gcontext,

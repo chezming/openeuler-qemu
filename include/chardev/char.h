@@ -229,6 +229,7 @@ bool qemu_chr_has_feature(Chardev *chr,
                           ChardevFeature feature);
 void qemu_chr_set_feature(Chardev *chr,
                           ChardevFeature feature);
+bool qemu_chr_cpr_support(Chardev *chr);
 QemuOpts *qemu_chr_parse_compat(const char *label, const char *filename,
                                 bool permit_mux_mon);
 int qemu_chr_write(Chardev *s, const uint8_t *buf, int len, bool write_all);
