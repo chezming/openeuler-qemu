@@ -2540,6 +2540,10 @@ static void qemu_process_early_options(void)
 #ifdef CONFIG_SECCOMP
     QemuOptsList *olist = qemu_find_opts_err("sandbox", NULL);
     if (olist) {
+        if (migrate_mode_enabled(MIG_MODE_CPR_EXEC)) {
+            qemu_opts_foreach(olist, cpr_exec_unset_spawn, NULL, &error_fatal);
+            olist = qemu_find_opts_err("sandbox", NULL);
+        }
         qemu_opts_foreach(olist, parse_sandbox, NULL, &error_fatal);
     }
 #endif
