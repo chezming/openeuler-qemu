@@ -31,3 +31,8 @@ MigMode migrate_mode_of(MigrationState *s)
 {
     return 0;
 }
+
+MigMode migrate_mode(void)
+{
+    return 0;
+}
