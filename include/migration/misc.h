@@ -56,6 +56,7 @@ AnnounceParameters *migrate_announce_params(void);
 void dump_vmstate_json_to_file(FILE *out_fp);
 
 /* migration/migration.c */
+void migration_object_early_init(void);
 void migration_object_init(void);
 void migration_shutdown(void);
 bool migration_is_idle(void);
