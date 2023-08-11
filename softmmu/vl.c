@@ -3725,6 +3725,8 @@ void qemu_init(int argc, char **argv, char **envp)
 
     suspend_mux_open();
 
+    migration_object_early_init();
+
     qemu_disable_default_devices();
     qemu_create_default_devices();
     qemu_create_early_backends();

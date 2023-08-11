@@ -190,12 +190,17 @@ static gint page_request_addr_cmp(gconstpointer ap, gconstpointer bp)
     return (a > b) - (a < b);
 }
 
-void migration_object_init(void)
+void migration_object_early_init(void)
 {
     /* This can only be called once. */
     assert(!current_migration);
     current_migration = MIGRATION_OBJ(object_new(TYPE_MIGRATION));
 
+    cpr_init();
+}
+
+void migration_object_init(void)
+{
     /*
      * Init the migrate incoming object as well no matter whether
      * we'll use it or not.
@@ -217,7 +222,6 @@ void migration_object_init(void)
     blk_mig_init();
     ram_mig_init();
     dirty_bitmap_mig_init();
-    cpr_init();
 }
 
 void migration_cancel(const Error *error)
