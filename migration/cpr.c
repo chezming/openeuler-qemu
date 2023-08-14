@@ -18,7 +18,10 @@ static Notifier cpr_fd_notifier;
 
 static int preserve_fd(const char *name, int id, int fd, void *opaque)
 {
-    qemu_clear_cloexec(fd);
+    /* MONITOR_CAPAB means fd is not a file descriptor */
+    if (id != MONITOR_CAPAB)
+        qemu_clear_cloexec(fd);
+
     return 0;
 }
 

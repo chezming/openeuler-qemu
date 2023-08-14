@@ -10,6 +10,14 @@
 
 #include "qapi/qapi-types-migration.h"
 
+/*
+ * Here, we use the cpr's file descriptor inheritance mechanism to
+ * pass the monitor capability. We define a special id number 0xFFFF
+ * to indicate that the fd is not a file descriptor. but a monitor
+ * capability.
+ * */
+#define MONITOR_CAPAB    0XFFFF
+
 typedef int (*cpr_walk_fd_cb)(const char *name, int id, int fd, void *opaque);
 
 void cpr_save_fd(const char *name, int id, int fd);
