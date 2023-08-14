@@ -431,6 +431,53 @@ static void vfio_msi_interrupt(void *opaque)
     notify(&vdev->pdev, nr);
 }
 
+static void vfio_device_interrupt_compensate(void *opaque)
+{
+    VFIOPCIDevice *vdev = opaque;
+    VFIOMSIVector *vector;
+    MSIMessage msg;
+    int nr_vectors, nr;
+
+    if (vdev->interrupt == VFIO_INT_MSIX) {
+        nr_vectors = vdev->nr_vectors;
+        for (nr = 0; nr < nr_vectors; nr++) {
+            vector = &vdev->msi_vectors[nr];
+            event_notifier_test_and_clear(&vector->interrupt);
+            if (msix_is_masked(&vdev->pdev, nr)) {
+                set_bit(nr, vdev->msix->pending);
+                memory_region_set_enabled(&vdev->pdev.msix_pba_mmio, true);
+                trace_vfio_msix_pba_enable(vdev->vbasedev.name);
+            }
+            msg = msix_get_message(&vdev->pdev, nr);
+            trace_vfio_msi_interrupt_compensate(vdev->vbasedev.name,
+                                          nr, msg.address, msg.data);
+            msix_notify(&vdev->pdev, nr);
+        }
+    } else if (vdev->interrupt == VFIO_INT_MSI) {
+            nr_vectors = vdev->nr_vectors;
+            for (nr = 0; nr < nr_vectors; nr++) {
+                vector = &vdev->msi_vectors[nr];
+                event_notifier_test_and_clear(&vector->interrupt);
+                msg = msi_get_message(&vdev->pdev, nr);
+                trace_vfio_msi_interrupt_compensate(vdev->vbasedev.name,
+                                              nr, msg.address, msg.data);
+                msi_notify(&vdev->pdev, nr);
+            }
+    } else {
+            /* legacy int */
+            event_notifier_test_and_clear(&vdev->intx.interrupt);
+            vdev->intx.pending = true;
+            pci_irq_assert(&vdev->pdev);
+            vfio_mmap_set_enabled(vdev, false);
+            if (vdev->intx.mmap_timeout) {
+                timer_mod(vdev->intx.mmap_timer,
+                    qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + vdev->intx.mmap_timeout);
+            }
+    }
+
+    return;
+}
+
 static int vfio_enable_vectors(VFIOPCIDevice *vdev, bool msix)
 {
     struct vfio_irq_set *irq_set;
@@ -3457,8 +3504,12 @@ static int vfio_pci_post_load(void *opaque, int version_id)
         ret = vfio_intx_enable(vdev, &err);
         if (ret) {
             error_report_err(err);
+            return ret;
         }
     }
+
+    qemu_add_cpr_exec_complete_handler(vfio_device_interrupt_compensate,
+                                       (void *)vdev);
 
     return ret;
 }
