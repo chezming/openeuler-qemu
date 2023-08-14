@@ -527,6 +527,12 @@ static void process_incoming_migration_bh(void *opaque)
 
     dirty_bitmap_mig_before_vm_start();
 
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        cpr_exec_complete_notify();
+        /* After qemu live update, no need to call handler anymore */
+        qemu_del_all_cpr_exec_complete_handler();
+    }
+
     if (!global_state_received() ||
         global_state_get_runstate() == RUN_STATE_RUNNING) {
         if (autostart) {
