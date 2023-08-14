@@ -2491,6 +2491,8 @@ static int vfio_pci_hot_reset_one(VFIOPCIDevice *vdev)
 static int vfio_pci_hot_reset_multi(VFIODevice *vbasedev)
 {
     VFIOPCIDevice *vdev = container_of(vbasedev, VFIOPCIDevice, vbasedev);
+    /* Reused dev should not call reset handler */
+    assert(!vdev->vbasedev.reused);
     return vfio_pci_hot_reset(vdev, false);
 }
 
@@ -2498,7 +2500,11 @@ static void vfio_pci_compute_needs_reset(VFIODevice *vbasedev)
 {
     VFIOPCIDevice *vdev = container_of(vbasedev, VFIOPCIDevice, vbasedev);
     if (!vbasedev->reset_works || (!vdev->has_flr && vdev->has_pm_reset)) {
-        vbasedev->needs_reset = true;
+        if (vdev->vbasedev.reused) {
+            vbasedev->needs_reset = false;
+        } else {
+            vbasedev->needs_reset = true;
+        }
     }
 }
 
