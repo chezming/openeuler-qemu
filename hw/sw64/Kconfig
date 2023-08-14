@@ -5,6 +5,7 @@ config CORE3
     imply E1000_PCI
     select PCI_EXPRESS
     select SUN4V_RTC
+    select SMBIOS
     select VIRTIO_MMIO
     select SERIAL
     select VIRTIO_VGA

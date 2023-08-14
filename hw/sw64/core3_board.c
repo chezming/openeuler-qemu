@@ -21,6 +21,9 @@
 #include "hw/sw64/sw64_iommu.h"
 #include "hw/loader.h"
 #include "hw/nvram/fw_cfg.h"
+#include "hw/boards.h"
+#include "sysemu/kvm.h"
+#include "hw/firmware/smbios.h"
 
 #define TYPE_SWBOARD_PCI_HOST_BRIDGE "core_board-pcihost"
 #define SWBOARD_PCI_HOST_BRIDGE(obj) \
@@ -44,6 +47,7 @@ typedef struct SWBoard {
 typedef struct BoardState {
     PCIHostState parent_obj;
 
+    FWCfgState *fw_cfg;
     SWBoard sboard;
     uint64_t expire_time;
 } BoardState;
@@ -53,7 +57,7 @@ typedef struct TimerState {
     int order;
 } TimerState;
 
-static void sw_create_fw_cfg(hwaddr addr)
+static FWCfgState *sw_create_fw_cfg(hwaddr addr)
 {
     MachineState *ms = MACHINE(qdev_get_machine());
     uint16_t smp_cpus = ms->smp.cpus;
@@ -61,7 +65,38 @@ static void sw_create_fw_cfg(hwaddr addr)
     fw_cfg = fw_cfg_init_mem_wide(addr + 8, addr, 8,
 			     addr + 16, &address_space_memory);
     fw_cfg_add_i16(fw_cfg, FW_CFG_NB_CPUS, smp_cpus);
-    rom_set_fw(fw_cfg);
+    return fw_cfg;
+}
+
+static void sw64_virt_build_smbios(BoardState *vms)
+{
+    uint8_t *smbios_tables, *smbios_anchor;
+    size_t smbios_tables_len, smbios_anchor_len;
+    const char *product = "QEMU Virtual Machine";
+
+    if (!vms->fw_cfg) {
+        return;
+    }
+
+    if (kvm_enabled()) {
+        product = "KVM Virtual Machine";
+    }
+    smbios_set_defaults("QEMU", product,
+                        "sw64", false,
+                        true, SMBIOS_ENTRY_POINT_30);
+
+
+    smbios_get_tables(MACHINE(qdev_get_machine()), NULL, 0,
+		      &smbios_tables, &smbios_tables_len,
+                      &smbios_anchor, &smbios_anchor_len,
+		      &error_fatal);
+
+    if (smbios_anchor) {
+        fw_cfg_add_file(vms->fw_cfg, "etc/smbios/smbios-tables",
+                        smbios_tables, smbios_tables_len);
+        fw_cfg_add_file(vms->fw_cfg, "etc/smbios/smbios-anchor",
+                        smbios_anchor, smbios_anchor_len);
+    }
 }
 
 #ifndef CONFIG_KVM
@@ -542,7 +577,9 @@ void core3_board_init(SW64CPU *cpus[MAX_CPUS], MemoryRegion *ram)
                        DEVICE_LITTLE_ENDIAN);
     }
     pci_create_simple(phb->bus, -1, "nec-usb-xhci");
-    sw_create_fw_cfg(SW_FW_CFG_P_BASE);
+    bs->fw_cfg = sw_create_fw_cfg(SW_FW_CFG_P_BASE);
+    rom_set_fw(bs->fw_cfg);
+    sw64_virt_build_smbios(bs);
 }
 
 static const TypeInfo swboard_pcihost_info = {
