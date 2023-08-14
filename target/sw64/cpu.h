@@ -229,6 +229,7 @@ static inline SW64CPU *sw64_env_get_cpu(CPUSW64State *env)
 
 #define SW64_CPU_TYPE_SUFFIX "-" TYPE_SW64_CPU
 #define SW64_CPU_TYPE_NAME(name) (name SW64_CPU_TYPE_SUFFIX)
+#define cpu_list sw64_cpu_list
 int cpu_sw64_signal_handler(int host_signum, void *pinfo, void *puc);
 int sw64_cpu_gdb_read_register(CPUState *cs, uint8_t *buf, int reg);
 int sw64_cpu_gdb_write_register(CPUState *cs, uint8_t *buf, int reg);
@@ -251,6 +252,7 @@ void sw64_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
     uintptr_t retaddr) QEMU_NORETURN;
 bool sw64_cpu_has_work(CPUState *cs);
 extern struct VMStateDescription vmstate_sw64_cpu;
+void sw64_cpu_list(void);
 
 /* SW64-specific interrupt pending bits */
 #define CPU_INTERRUPT_TIMER CPU_INTERRUPT_TGT_EXT_0

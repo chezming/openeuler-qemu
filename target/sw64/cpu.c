@@ -120,6 +120,34 @@ static void sw64_cpu_realizefn(DeviceState *dev, Error **errp)
     scc->parent_realize(dev, errp);
 }
 
+static char *sw64_cpu_class_get_model_name(SW64CPUClass *cc)
+{
+    const char *class_name = object_class_get_name(OBJECT_CLASS(cc));
+    assert(g_str_has_suffix(class_name, SW64_CPU_TYPE_SUFFIX));
+    return g_strndup(class_name,
+                   strlen(class_name) - strlen(SW64_CPU_TYPE_SUFFIX));
+}
+
+static void sw64_cpu_list_entry(gpointer data, gpointer user_data)
+{
+    ObjectClass *oc = data;
+    SW64CPUClass *cc = SW64_CPU_CLASS(oc);
+
+    char *name = sw64_cpu_class_get_model_name(cc);
+    qemu_printf("sw64 %s\n", name);
+    g_free(name);
+}
+
+void sw64_cpu_list(void)
+{
+    GSList *list;
+
+    list = object_class_get_list_sorted(TYPE_SW64_CPU, false);
+    qemu_printf("Available CPUs:\n");
+    g_slist_foreach(list, sw64_cpu_list_entry, NULL);
+    g_slist_free(list);
+}
+
 static void sw64_cpu_disas_set_info(CPUState *cs, disassemble_info *info)
 {
     CPUSW64State *env = cs->env_ptr;

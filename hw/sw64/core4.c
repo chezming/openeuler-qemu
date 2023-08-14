@@ -150,7 +150,6 @@ static void core4_machine_init(MachineClass *mc)
     mc->init = core4_init;
     mc->block_default_type = IF_IDE;
     mc->max_cpus = MAX_CPUS;
-    mc->is_default = 0;
     mc->reset = board_reset;
     mc->default_ram_id = "ram";
     mc->default_cpu_type = SW64_CPU_TYPE_NAME("core4");
