@@ -17,6 +17,7 @@
 #include "migration/misc.h"
 #include "migration/qemu-file.h"
 #include "migration/qemu-file-channel.h"
+#include "sysemu/sysemu.h"
 #include "trace.h"
 
 /*************************************************************************/
@@ -323,6 +324,12 @@ int cpr_state_load(Error **errp)
 
     if (!ret) {
         migrate_get_current()->parameters.mode = cpr_state.mode;
+        assert(migrate_mode() == MIG_MODE_CPR_EXEC);
+        /*
+         * cpr exec mode ignore qemu -S option to reduce interactions
+         * with libvirtd and acelerate qemu live update.
+         */
+        autostart = true;
     } else {
         error_setg(errp, "vmstate_load_state error %d", ret);
     }
