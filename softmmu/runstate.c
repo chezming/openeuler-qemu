@@ -265,6 +265,53 @@ void qemu_system_vmstop_request(RunState state)
     qemu_mutex_unlock(&vmstop_lock);
     qemu_notify_event();
 }
+
+struct CprExecCompleteEntry {
+    CprExecCompleteHandler *cb;
+    void *opaque;
+    QTAILQ_ENTRY(CprExecCompleteEntry) entries;
+};
+
+static QTAILQ_HEAD(, CprExecCompleteEntry) cpr_exec_complete_head =
+    QTAILQ_HEAD_INITIALIZER(cpr_exec_complete_head);
+
+/*
+ * qemu_add_cpr_exec_complete_handler:
+ * @cb: the callback to invoke
+ * @opaque: user data passed to the callback
+ */
+CprExecCompleteEntry *qemu_add_cpr_exec_complete_handler(
+                CprExecCompleteHandler *cb, void *opaque)
+{
+    CprExecCompleteEntry *e;
+
+    e = g_malloc0(sizeof(*e));
+    e->cb = cb;
+    e->opaque = opaque;
+    QTAILQ_INSERT_TAIL(&cpr_exec_complete_head, e, entries);
+
+    return e;
+}
+
+void qemu_del_all_cpr_exec_complete_handler(void)
+{
+    CprExecCompleteEntry *e = NULL, *next_e = NULL;
+
+    QTAILQ_FOREACH_SAFE(e, &cpr_exec_complete_head, entries, next_e) {
+        QTAILQ_REMOVE(&cpr_exec_complete_head, e, entries);
+        g_free(e);
+    }
+}
+
+void cpr_exec_complete_notify(void)
+{
+    CprExecCompleteEntry *e;
+
+    QTAILQ_FOREACH(e, &cpr_exec_complete_head, entries) {
+        e->cb(e->opaque);
+    }
+}
+
 struct VMChangeStateEntry {
     VMChangeStateHandler *cb;
     void *opaque;

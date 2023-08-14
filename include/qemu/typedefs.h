@@ -123,6 +123,7 @@ typedef struct SSIBus SSIBus;
 typedef struct TranslationBlock TranslationBlock;
 typedef struct VirtIODevice VirtIODevice;
 typedef struct Visitor Visitor;
+typedef struct CprExecCompleteEntry CprExecCompleteEntry;
 typedef struct VMChangeStateEntry VMChangeStateEntry;
 typedef struct VMStateDescription VMStateDescription;
 

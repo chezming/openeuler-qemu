@@ -10,6 +10,12 @@ bool runstate_is_running(void);
 bool runstate_needs_reset(void);
 bool runstate_store(char *str, size_t size);
 
+typedef void CprExecCompleteHandler(void *opaque);
+CprExecCompleteEntry *qemu_add_cpr_exec_complete_handler(
+                CprExecCompleteHandler *cb, void *opaque);
+void qemu_del_all_cpr_exec_complete_handler(void);
+void cpr_exec_complete_notify(void);
+
 typedef void VMChangeStateHandler(void *opaque, bool running, RunState state);
 
 VMChangeStateEntry *qemu_add_vm_change_state_handler(VMChangeStateHandler *cb,
