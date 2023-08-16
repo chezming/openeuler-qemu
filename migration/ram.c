@@ -201,7 +201,9 @@ out:
 bool ramblock_is_ignored(RAMBlock *block)
 {
     return !qemu_ram_is_migratable(block) ||
-           (migrate_ignore_shared() && qemu_ram_is_shared(block));
+           migrate_mode() == MIG_MODE_CPR_EXEC ||
+           (migrate_ignore_shared() && qemu_ram_is_shared(block) &&
+            ramblock_is_named_file(block));
 }
 
 #undef RAMBLOCK_FOREACH
@@ -3196,7 +3198,8 @@ static void ram_init_bitmaps(RAMState *rs)
     WITH_RCU_READ_LOCK_GUARD() {
         ram_list_init_bitmaps();
         /* We don't use dirty log with background snapshots */
-        if (!migrate_background_snapshot()) {
+        if (!migrate_background_snapshot() &&
+            migrate_mode() == MIG_MODE_NORMAL) {
             memory_global_dirty_log_start(GLOBAL_DIRTY_MIGRATION);
             migration_bitmap_sync_precopy(rs);
         }
@@ -4398,13 +4401,16 @@ static int ram_load_precopy(QEMUFile *f)
                     }
                     if (migrate_ignore_shared()) {
                         hwaddr addr = qemu_get_be64(f);
-                        if (ramblock_is_ignored(block) &&
-                            block->mr->addr != addr) {
-                            error_report("Mismatched GPAs for block %s "
-                                         "%" PRId64 "!= %" PRId64,
-                                         id, (uint64_t)addr,
-                                         (uint64_t)block->mr->addr);
-                            ret = -EINVAL;
+                        if (ramblock_is_ignored(block)) {
+                            if (!block->mr->has_addr) {
+                                memory_region_set_address_only(block->mr, addr);
+                            } else if (block->mr->addr != addr) {
+                                error_report("Mismatched GPAs for block %s "
+                                    "%" PRId64 "!= %" PRId64,
+                                    id, (uint64_t)addr,
+                                    (uint64_t)block->mr->addr);
+                                ret = -EINVAL;
+                            }
                         }
                     }
                     ram_control_load_hook(f, RAM_CONTROL_BLOCK_REG,

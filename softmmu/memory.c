@@ -33,6 +33,7 @@
 #include "qemu/accel.h"
 #include "hw/boards.h"
 #include "migration/vmstate.h"
+#include "migration/cpr-state.h"
 
 //#define DEBUG_UNASSIGNED
 
@@ -1593,6 +1594,7 @@ void memory_region_init_ram_from_file(MemoryRegion *mr,
                                       bool readonly,
                                       Error **errp)
 {
+    int fd;
     Error *err = NULL;
     memory_region_init(mr, owner, name, size);
     mr->ram = true;
@@ -1600,8 +1602,21 @@ void memory_region_init_ram_from_file(MemoryRegion *mr,
     mr->terminates = true;
     mr->destructor = memory_region_destructor_ram;
     mr->align = align;
-    mr->ram_block = qemu_ram_alloc_from_file(size, mr, ram_flags, path,
-                                             readonly, &err);
+
+    /* make sure mr has a valid name */
+    memory_region_name(mr);
+    fd = cpr_find_fd(mr->name, 0);
+    if (fd < 0) {
+        mr->ram_block = qemu_ram_alloc_from_file(size, mr, ram_flags, path,
+                                                 readonly, &err);
+        if (mr->ram_block) {
+            fd = mr->ram_block->fd;
+            cpr_save_fd(mr->name, 0, fd);
+        }
+    } else {
+        mr->ram_block = qemu_ram_alloc_from_fd(size, mr, ram_flags, fd, 0,
+                                               readonly, &err);
+    }
     if (err) {
         mr->size = int128_zero();
         object_unparent(OBJECT(mr));
@@ -2537,7 +2552,7 @@ static void memory_region_add_subregion_common(MemoryRegion *mr,
 {
     assert(!subregion->container);
     subregion->container = mr;
-    subregion->addr = offset;
+    memory_region_set_address_only(subregion, offset);
     memory_region_update_container_subregions(subregion);
 }
 
@@ -2612,10 +2627,16 @@ static void memory_region_readd_subregion(MemoryRegion *mr)
     }
 }
 
+void memory_region_set_address_only(MemoryRegion *mr, hwaddr addr)
+{
+    mr->addr = addr;
+    mr->has_addr = true;
+}
+
 void memory_region_set_address(MemoryRegion *mr, hwaddr addr)
 {
     if (addr != mr->addr) {
-        mr->addr = addr;
+        memory_region_set_address_only(mr, addr);
         memory_region_readd_subregion(mr);
     }
 }
@@ -2661,6 +2682,27 @@ static FlatRange *flatview_lookup(FlatView *view, AddrRange addr)
 bool memory_region_is_mapped(MemoryRegion *mr)
 {
     return mr->container ? true : false;
+}
+
+int address_space_flat_for_each_section(AddressSpace *as,
+                                        memory_region_section_cb func,
+                                        void *opaque,
+                                        Error **errp)
+{
+    FlatView *view = address_space_get_flatview(as);
+    FlatRange *fr;
+    int ret;
+
+    FOR_EACH_FLAT_RANGE(fr, view) {
+        MemoryRegionSection mrs = section_from_flat_range(fr, view);
+        ret = func(&mrs, opaque, errp);
+        if (ret) {
+            return ret;
+        }
+    }
+
+    flatview_unref(view);
+    return 0;
 }
 
 /* Same as memory_region_find, but it does not add a reference to the

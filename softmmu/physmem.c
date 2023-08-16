@@ -43,6 +43,7 @@
 #include "qemu/qemu-print.h"
 #include "qemu/log.h"
 #include "exec/memory.h"
+#include "qemu/memfd.h"
 #include "exec/ioport.h"
 #include "sysemu/dma.h"
 #include "sysemu/hostmem.h"
@@ -65,6 +66,9 @@
 
 #include "qemu/pmem.h"
 
+#include "migration/blocker.h"
+#include "migration/cpr-state.h"
+#include "migration/misc.h"
 #include "migration/vmstate.h"
 
 #include "qemu/range.h"
@@ -1978,6 +1982,83 @@ static void dirty_memory_extend(ram_addr_t old_ram_size,
     }
 }
 
+static bool memory_region_is_backend(MemoryRegion *mr)
+{
+    return !!object_dynamic_cast(OBJECT(mr)->parent, TYPE_MEMORY_BACKEND);
+}
+
+/*
+ * Return true if ram contents would be lost during cpr for MIG_MODE_CPR_EXEC.
+ * Return false for ram_device because it is remapped after exec.  Do not
+ * exclude rom, even though it is readonly, because the rom file could change
+ * in the new qemu.  Return false for non-migratable blocks.  They are either
+ * re-created after exec, or are handled specially, or are covered by a
+ * device-level cpr blocker.  Return false for an fd, because it is visible and
+ * can be remapped in the new process.
+ */
+static bool ram_is_volatile(RAMBlock *rb)
+{
+    MemoryRegion *mr = rb->mr;
+
+    return mr &&
+        memory_region_is_ram(mr) &&
+        !memory_region_is_ram_device(mr) &&
+        (!qemu_ram_is_shared(rb) || !ramblock_is_named_file(rb)) &&
+        qemu_ram_is_migratable(rb) &&
+        rb->fd < 0;
+}
+
+/*
+ * Add a MIG_MODE_CPR_EXEC blocker for each volatile ram block.  This cannot be
+ * performed in ram_block_add because the migratable flag has not been set yet.
+ * No need to examine anonymous (non-backend) blocks, because they are
+ * created using memfd if cpr-exec mode is enabled.
+ */
+void ram_block_add_cpr_blockers(Error **errp)
+{
+    RAMBlock *rb;
+
+    RAMBLOCK_FOREACH(rb) {
+        if (ram_is_volatile(rb) && memory_region_is_backend(rb->mr)) {
+            const char *name = memory_region_name(rb->mr);
+            rb->cpr_blocker = NULL;
+            error_setg(&rb->cpr_blocker,
+                "Memory region %s is volatile. A memory-backend-memfd or"
+                " memory-backend-file with share=on is required.", name);
+            migrate_add_blockers(&rb->cpr_blocker, errp, MIG_MODE_CPR_EXEC, -1);
+        }
+    }
+}
+
+static void *qemu_anon_memfd_alloc(RAMBlock *rb, size_t maxlen, Error **errp)
+{
+    size_t len, align;
+    void *addr;
+    struct MemoryRegion *mr = rb->mr;
+    const char *name = memory_region_name(mr);
+    int mfd = cpr_find_memfd(name, &len, &maxlen, &align);
+
+    if (mfd >= 0) {
+        rb->used_length = len;
+        rb->max_length = maxlen;
+        mr->align = align;
+    } else {
+        len = rb->used_length;
+        maxlen = rb->max_length;
+        mr->align = QEMU_VMALLOC_ALIGN;
+        mfd = qemu_memfd_create(name, maxlen + mr->align, 0, 0, 0, errp);
+        if (mfd < 0) {
+            return NULL;
+        }
+        cpr_save_memfd(name, mfd, len, maxlen, mr->align);
+    }
+    rb->flags |= RAM_SHARED;
+    qemu_set_cloexec(mfd);
+    addr = file_ram_alloc(rb, maxlen, mfd, false, false, 0, errp);
+    trace_anon_memfd_alloc(name, maxlen, addr, mfd);
+    return addr;
+}
+
 static void ram_block_add(RAMBlock *new_block, Error **errp)
 {
     const bool noreserve = qemu_ram_is_noreserve(new_block);
@@ -2001,6 +2082,14 @@ static void ram_block_add(RAMBlock *new_block, Error **errp)
                 qemu_mutex_unlock_ramlist();
                 return;
             }
+        } else if (migrate_mode_enabled(MIG_MODE_CPR_EXEC) &&
+                   !memory_region_is_backend(new_block->mr)) {
+            new_block->host = qemu_anon_memfd_alloc(new_block,
+                                                    new_block->max_length,
+                                                    errp);
+            if (!new_block->host) {
+                return;
+            }
         } else {
             new_block->host = qemu_anon_ram_alloc(new_block->max_length,
                                                   &new_block->mr->align,
@@ -2012,8 +2101,9 @@ static void ram_block_add(RAMBlock *new_block, Error **errp)
                 qemu_mutex_unlock_ramlist();
                 return;
             }
-            memory_try_enable_merging(new_block->host, new_block->max_length);
         }
+        if (!xen_enabled())
+            memory_try_enable_merging(new_block->host, new_block->max_length);
     }
 
     new_ram_size = MAX(old_ram_size,
@@ -2077,7 +2167,7 @@ RAMBlock *qemu_ram_alloc_from_fd(ram_addr_t size, MemoryRegion *mr,
 
     /* Just support these ram flags by now. */
     assert((ram_flags & ~(RAM_SHARED | RAM_PMEM | RAM_NORESERVE |
-                          RAM_PROTECTED)) == 0);
+                          RAM_PROTECTED | RAM_NAMED_FILE)) == 0);
 
     if (xen_enabled()) {
         error_setg(errp, "-mem-path not supported with Xen");
@@ -2246,6 +2336,8 @@ void qemu_ram_free(RAMBlock *block)
     }
 
     qemu_mutex_lock_ramlist();
+    cpr_delete_memfd(memory_region_name(block->mr));
+    migrate_del_blocker(&block->cpr_blocker);
     QLIST_REMOVE_RCU(block, next);
     ram_list.mru_block = NULL;
     /* Write list before version */
@@ -3680,6 +3772,11 @@ err:
 bool ramblock_is_pmem(RAMBlock *rb)
 {
     return rb->flags & RAM_PMEM;
+}
+
+bool ramblock_is_named_file(RAMBlock *rb)
+{
+	return rb->flags & RAM_NAMED_FILE;
 }
 
 static void mtree_print_phys_entries(int start, int end, int skip, int ptr)

@@ -28,6 +28,7 @@
 #include "qemu/units.h"
 #include "qemu/log.h"
 #include "exec/cpu-common.h"
+#include "exec/memory.h"
 #include "hw/qdev-properties.h"
 #include "qapi/compat-policy.h"
 #include "qapi/error.h"
@@ -75,6 +76,7 @@
 #include "hw/block/block.h"
 #include "hw/i386/x86.h"
 #include "hw/i386/pc.h"
+#include "migration/cpr.h"
 #include "migration/misc.h"
 #include "migration/snapshot.h"
 #include "sysemu/tpm.h"
@@ -2538,6 +2540,10 @@ static void qemu_process_early_options(void)
 #ifdef CONFIG_SECCOMP
     QemuOptsList *olist = qemu_find_opts_err("sandbox", NULL);
     if (olist) {
+        if (migrate_mode_enabled(MIG_MODE_CPR_EXEC)) {
+            qemu_opts_foreach(olist, cpr_exec_unset_spawn, NULL, &error_fatal);
+            olist = qemu_find_opts_err("sandbox", NULL);
+        }
         qemu_opts_foreach(olist, parse_sandbox, NULL, &error_fatal);
     }
 #endif
@@ -2745,6 +2751,7 @@ void qmp_x_exit_preconfig(Error **errp)
     qemu_init_board();
     qemu_create_cli_devices();
     qemu_machine_creation_done();
+    ram_block_add_cpr_blockers(&error_fatal);
 
     if (loadvm) {
         load_snapshot(loadvm, NULL, false, NULL, &error_fatal);
@@ -3512,6 +3519,13 @@ void qemu_init(int argc, char **argv, char **envp)
             case QEMU_OPTION_only_migratable:
                 only_migratable = 1;
                 break;
+            case QEMU_OPTION_only_cpr_capable:
+                only_cpr_capable = true;
+                break;
+            case QEMU_OPTION_migrate_mode_enable:
+                migrate_enable_mode(qapi_enum_parse(&MigMode_lookup, optarg, -1,
+                                                    &error_fatal));
+                break;
             case QEMU_OPTION_nodefaults:
                 has_defaults = 0;
                 break;
@@ -3714,6 +3728,8 @@ void qemu_init(int argc, char **argv, char **envp)
     qemu_create_machine(machine_opts_dict);
 
     suspend_mux_open();
+
+    migration_object_early_init();
 
     qemu_disable_default_devices();
     qemu_create_default_devices();

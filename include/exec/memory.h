@@ -206,6 +206,9 @@ typedef struct IOMMUTLBEvent {
 /* RAM that isn't accessible through normal means. */
 #define RAM_PROTECTED (1 << 8)
 
+/* RAM is an mmap-ed named file */
+#define RAM_NAMED_FILE (1 << 9)
+
 static inline void iommu_notifier_init(IOMMUNotifier *n, IOMMUNotify fn,
                                        IOMMUNotifierFlag flags,
                                        hwaddr start, hwaddr end,
@@ -735,6 +738,7 @@ struct MemoryRegion {
     bool flush_coalesced_mmio;
     uint8_t dirty_log_mask;
     bool is_iommu;
+    bool has_addr;
     RAMBlock *ram_block;
     Object *owner;
 
@@ -2264,6 +2268,17 @@ void memory_region_set_enabled(MemoryRegion *mr, bool enabled);
 void memory_region_set_address(MemoryRegion *mr, hwaddr addr);
 
 /*
+ * memory_region_set_address_only: set the address of a region.
+ *
+ * Same as memory_region_set_address, but without causing transaction side
+ * effects.
+ *
+ * @mr: the region to be updated
+ * @addr: new address, relative to container region
+ */
+void memory_region_set_address_only(MemoryRegion *mr, hwaddr addr);
+
+/*
  * memory_region_set_size: dynamically update the size of a region.
  *
  * Dynamically updates the size of a region.
@@ -2339,6 +2354,25 @@ static inline bool memory_region_has_ram_discard_manager(MemoryRegion *mr)
  */
 void memory_region_set_ram_discard_manager(MemoryRegion *mr,
                                            RamDiscardManager *rdm);
+
+typedef int (*memory_region_section_cb)(MemoryRegionSection *mrs,
+                                        void *opaque,
+                                        Error **errp);
+
+/**
+ * address_space_flat_for_each_section: walk the ranges in the address space
+ * flat view and call @func for each.  Return 0 on success, else return non-zero
+ * with a message in @errp.
+ *
+ * @as: target address space
+ * @func: callback function
+ * @opaque: passed to @func
+ * @errp: passed to @func
+ */
+int address_space_flat_for_each_section(AddressSpace *as,
+                                        memory_region_section_cb func,
+                                        void *opaque,
+                                        Error **errp);
 
 /**
  * memory_region_find: translate an address/size relative to a
@@ -2999,6 +3033,8 @@ bool ram_block_discard_is_disabled(void);
  * Test if any discarding of memory in ram blocks is required to work reliably.
  */
 bool ram_block_discard_is_required(void);
+
+void ram_block_add_cpr_blockers(Error **errp);
 
 #endif
 

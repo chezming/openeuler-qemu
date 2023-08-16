@@ -31,6 +31,7 @@
 #include "exec/memory.h"
 #include "exec/ram_addr.h"
 #include "hw/hw.h"
+#include "migration/cpr-state.h"
 #include "qemu/error-report.h"
 #include "qemu/main-loop.h"
 #include "qemu/range.h"
@@ -483,6 +484,8 @@ static int vfio_dma_unmap(VFIOContainer *container,
     };
     VFIODMARange *qrange;
 
+    assert(!container->reused);
+
     if (iotlb && container->dirty_pages_supported &&
         vfio_devices_all_running_and_saving(container)) {
         return vfio_dma_unmap_bitmap(container, iova, size, iotlb);
@@ -535,7 +538,6 @@ static int vfio_dma_map(VFIOContainer *container, hwaddr iova,
 {
     struct vfio_iommu_type1_dma_map map = {
         .argsz = sizeof(map),
-        .flags = VFIO_DMA_MAP_FLAG_READ,
         .vaddr = (__u64)(uintptr_t)vaddr,
         .iova = iova,
         .size = size,
@@ -549,6 +551,19 @@ static int vfio_dma_map(VFIOContainer *container, hwaddr iova,
     /* XXX allocate the dirty bitmap on demand */
     vfio_dma_range_init_dirty_bitmap(qrange);
 
+    /*
+     * Set the new vaddr for any mappings registered during cpr load.
+     * Reused is cleared thereafter.
+     */
+    if (container->reused) {
+        map.flags = VFIO_DMA_MAP_FLAG_VADDR;
+        if (ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map)) {
+            goto fail;
+        }
+        return 0;
+    }
+
+    map.flags = VFIO_DMA_MAP_FLAG_READ;
     if (!readonly) {
         map.flags |= VFIO_DMA_MAP_FLAG_WRITE;
     }
@@ -564,7 +579,9 @@ static int vfio_dma_map(VFIOContainer *container, hwaddr iova,
         return 0;
     }
 
-    error_report("VFIO_MAP_DMA failed: %s", strerror(errno));
+fail:
+    error_report("vfio_dma_map %s (iova %lu, size %ld, va %p): %s",
+        (container->reused ? "VADDR" : ""), iova, size, vaddr, strerror(errno));
     return -errno;
 }
 
@@ -909,10 +926,36 @@ static void vfio_unregister_ram_discard_listener(VFIOContainer *container,
     g_free(vrdl);
 }
 
+static VFIORamDiscardListener *vfio_find_ram_discard_listener(
+    VFIOContainer *container, MemoryRegionSection *section)
+{
+    VFIORamDiscardListener *vrdl;
+
+    QLIST_FOREACH(vrdl, &container->vrdl_list, next) {
+        if (vrdl->mr == section->mr &&
+            vrdl->offset_within_address_space ==
+            section->offset_within_address_space) {
+            break;
+        }
+    }
+
+    if (!vrdl) {
+        hw_error("vfio: Trying to sync missing RAM discard listener");
+        /* does not return */
+    }
+    return vrdl;
+}
+
 static void vfio_listener_region_add(MemoryListener *listener,
                                      MemoryRegionSection *section)
 {
     VFIOContainer *container = container_of(listener, VFIOContainer, listener);
+    vfio_container_region_add(container, section, false);
+}
+
+void vfio_container_region_add(VFIOContainer *container,
+                               MemoryRegionSection *section, bool remap)
+{
     hwaddr iova, end;
     Int128 llend, llsize;
     void *vaddr;
@@ -1033,6 +1076,30 @@ static void vfio_listener_region_add(MemoryListener *listener,
         int iommu_idx;
 
         trace_vfio_listener_region_add_iommu(iova, end);
+
+        /*
+         * If remap, then VFIO_DMA_UNMAP_FLAG_VADDR has been called, and we
+         * want to remap the vaddr.  vfio_container_region_add was already
+         * called in the past, so the giommu already exists.  Find it and
+         * replay it, which calls vfio_dma_map further down the stack.
+         */
+
+        if (remap) {
+            hwaddr as_offset = section->offset_within_address_space;
+            hwaddr iommu_offset = as_offset - section->offset_within_region;
+
+            QLIST_FOREACH(giommu, &container->giommu_list, giommu_next) {
+                if (giommu->iommu == iommu_mr &&
+                    giommu->iommu_offset == iommu_offset) {
+                    memory_region_iommu_replay(giommu->iommu, &giommu->n);
+                    return;
+                }
+            }
+            error_report("Container cannot find iommu region %s offset %lx",
+                memory_region_name(section->mr), iommu_offset);
+            goto fail;
+        }
+
         /*
          * FIXME: For VFIO iommu types which have KVM acceleration to
          * avoid bouncing all map/unmaps through qemu this way, this
@@ -1083,7 +1150,21 @@ static void vfio_listener_region_add(MemoryListener *listener,
      * about changes.
      */
     if (memory_region_has_ram_discard_manager(section->mr)) {
-        vfio_register_ram_discard_listener(container, section);
+        /*
+         * If remap, then VFIO_DMA_UNMAP_FLAG_VADDR has been called, and we
+         * want to remap the vaddr.  vfio_container_region_add was already
+         * called in the past, so the ram discard listener already exists.
+         * Call its populate function directly, which calls vfio_dma_map.
+         */
+        if (remap)  {
+            VFIORamDiscardListener *vrdl =
+                vfio_find_ram_discard_listener(container, section);
+            if (vrdl->listener.notify_populate(&vrdl->listener, section)) {
+                error_report("listener.notify_populate failed");
+            }
+        } else {
+            vfio_register_ram_discard_listener(container, section);
+        }
         return;
     }
 
@@ -1412,19 +1493,8 @@ static int vfio_sync_ram_discard_listener_dirty_bitmap(VFIOContainer *container,
                                                    MemoryRegionSection *section)
 {
     RamDiscardManager *rdm = memory_region_get_ram_discard_manager(section->mr);
-    VFIORamDiscardListener *vrdl = NULL;
-
-    QLIST_FOREACH(vrdl, &container->vrdl_list, next) {
-        if (vrdl->mr == section->mr &&
-            vrdl->offset_within_address_space ==
-            section->offset_within_address_space) {
-            break;
-        }
-    }
-
-    if (!vrdl) {
-        hw_error("vfio: Trying to sync missing RAM discard listener");
-    }
+    VFIORamDiscardListener *vrdl =
+        vfio_find_ram_discard_listener(container, section);
 
     /*
      * We only want/can synchronize the bitmap for actually mapped parts -
@@ -1644,6 +1714,12 @@ static void vfio_listener_release(VFIOContainer *container)
     if (container->iommu_type == VFIO_SPAPR_TCE_v2_IOMMU) {
         memory_listener_unregister(&container->prereg_listener);
     }
+}
+
+void vfio_listener_register(VFIOContainer *container)
+{
+    container->listener = vfio_memory_listener;
+    memory_listener_register(&container->listener, container->space->as);
 }
 
 static struct vfio_info_cap_header *
@@ -2065,6 +2141,22 @@ static int vfio_init_container(VFIOContainer *container, int group_fd,
 {
     int iommu_type, dirty_log_manual_clear, ret;
 
+    /*
+     * If container is reused, just set its type and skip the ioctls, as the
+     * container and group are already configured in the kernel.
+     * VFIO_TYPE1v2_IOMMU is the only type that supports reuse/cpr.
+     */
+    if (container->reused) {
+        if (ioctl(container->fd, VFIO_CHECK_EXTENSION, VFIO_TYPE1v2_IOMMU)) {
+            container->iommu_type = VFIO_TYPE1v2_IOMMU;
+            return 0;
+        } else {
+            error_setg(errp, "container was reused but VFIO_TYPE1v2_IOMMU "
+                             "is not supported");
+            return -errno;
+        }
+    }
+
     iommu_type = vfio_get_iommu_type(container, errp);
     if (iommu_type < 0) {
         return iommu_type;
@@ -2176,9 +2268,12 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
 {
     VFIOContainer *container;
     int ret, fd;
+    bool reused;
     VFIOAddressSpace *space;
 
     space = vfio_get_address_space(as);
+    fd = cpr_find_fd("vfio_container_for_group", group->groupid);
+    reused = (fd > 0);
 
     /*
      * VFIO is currently incompatible with discarding of RAM insofar as the
@@ -2211,27 +2306,46 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
      * details once we know which type of IOMMU we are using.
      */
 
+    /*
+     * If the container is reused, then the group is already attached in the
+     * kernel.  If a container with matching fd is found, then update the
+     * userland group list and return.  If not, then after the loop, create
+     * the container struct and group list.
+     */
     QLIST_FOREACH(container, &space->containers, next) {
-        if (!ioctl(group->fd, VFIO_GROUP_SET_CONTAINER, &container->fd)) {
-            ret = vfio_ram_block_discard_disable(container, true);
-            if (ret) {
-                error_setg_errno(errp, -ret,
-                                 "Cannot set discarding of RAM broken");
-                if (ioctl(group->fd, VFIO_GROUP_UNSET_CONTAINER,
-                          &container->fd)) {
-                    error_report("vfio: error disconnecting group %d from"
-                                 " container", group->groupid);
-                }
-                return ret;
+        if (reused) {
+            if (container->fd != fd) {
+                continue;
             }
-            group->container = container;
-            QLIST_INSERT_HEAD(&container->group_list, group, container_next);
-            vfio_kvm_device_add_group(group);
-            return 0;
+        } else if (ioctl(group->fd, VFIO_GROUP_SET_CONTAINER, &container->fd)) {
+            continue;
         }
+
+        ret = vfio_ram_block_discard_disable(container, true);
+        if (ret) {
+            error_setg_errno(errp, -ret,
+                             "Cannot set discarding of RAM broken");
+            if (ioctl(group->fd, VFIO_GROUP_UNSET_CONTAINER,
+                      &container->fd)) {
+                error_report("vfio: error disconnecting group %d from"
+                             " container", group->groupid);
+            }
+            goto delete_fd_exit;
+        }
+        group->container = container;
+        QLIST_INSERT_HEAD(&container->group_list, group, container_next);
+        if (!reused) {
+            vfio_kvm_device_add_group(group);
+            cpr_save_fd("vfio_container_for_group", group->groupid,
+                        container->fd);
+        }
+        return 0;
     }
 
-    fd = qemu_open_old("/dev/vfio/vfio", O_RDWR);
+    if (!reused) {
+        fd = qemu_open_old("/dev/vfio/vfio", O_RDWR);
+    }
+
     if (fd < 0) {
         error_setg_errno(errp, errno, "failed to open /dev/vfio/vfio");
         ret = -errno;
@@ -2249,6 +2363,7 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     container = g_malloc0(sizeof(*container));
     container->space = space;
     container->fd = fd;
+    container->reused = reused;
     container->error = NULL;
     container->dirty_pages_supported = false;
     container->dma_max_mappings = 0;
@@ -2262,10 +2377,15 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
         goto free_container_exit;
     }
 
+    ret = vfio_cpr_register_container(container, errp);
+    if (ret) {
+        goto free_container_exit;
+    }
+
     ret = vfio_ram_block_discard_disable(container, true);
     if (ret) {
         error_setg_errno(errp, -ret, "Cannot set discarding of RAM broken");
-        goto free_container_exit;
+        goto unregister_container_exit;
     }
 
     switch (container->iommu_type) {
@@ -2376,9 +2496,16 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     group->container = container;
     QLIST_INSERT_HEAD(&container->group_list, group, container_next);
 
-    container->listener = vfio_memory_listener;
-
-    memory_listener_register(&container->listener, container->space->as);
+    /*
+     * If reused, register the listener later, after all state that may
+     * affect regions and mapping boundaries has been cpr load'ed.  Later,
+     * the listener will invoke its callback on each flat section and call
+     * vfio_dma_map to supply the new vaddr, and the calls will match the
+     * mappings remembered by the kernel.
+     */
+    if (!reused) {
+        vfio_listener_register(container);
+    }
 
     if (container->error) {
         ret = -1;
@@ -2388,6 +2515,7 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     }
 
     container->initialized = true;
+    cpr_resave_fd("vfio_container_for_group", group->groupid, fd);
 
     return 0;
 listener_release_exit:
@@ -2399,6 +2527,9 @@ listener_release_exit:
 enable_discards_exit:
     vfio_ram_block_discard_disable(container, false);
 
+unregister_container_exit:
+    vfio_cpr_unregister_container(container);
+
 free_container_exit:
     g_free(container);
 
@@ -2407,6 +2538,9 @@ close_fd_exit:
 
 put_space_exit:
     vfio_put_address_space(space);
+
+delete_fd_exit:
+    cpr_delete_fd("vfio_container_for_group", group->groupid);
 
     return ret;
 }
@@ -2417,6 +2551,7 @@ static void vfio_disconnect_container(VFIOGroup *group)
 
     QLIST_REMOVE(group, container_next);
     group->container = NULL;
+    cpr_delete_fd("vfio_container_for_group", group->groupid);
 
     /*
      * Explicitly release the listener first before unset container,
@@ -2453,6 +2588,7 @@ static void vfio_disconnect_container(VFIOGroup *group)
         }
 
         trace_vfio_disconnect_container(container->fd);
+        vfio_cpr_unregister_container(container);
         close(container->fd);
         g_free(container);
 
@@ -2482,7 +2618,11 @@ VFIOGroup *vfio_get_group(int groupid, AddressSpace *as, Error **errp)
     group = g_malloc0(sizeof(*group));
 
     snprintf(path, sizeof(path), "/dev/vfio/%d", groupid);
-    group->fd = qemu_open_old(path, O_RDWR);
+
+    group->fd = cpr_find_fd("vfio_group", groupid);
+    if (group->fd < 0) {
+        group->fd = qemu_open_old(path, O_RDWR);
+    }
     if (group->fd < 0) {
         error_setg_errno(errp, errno, "failed to open %s", path);
         goto free_group_exit;
@@ -2515,6 +2655,7 @@ VFIOGroup *vfio_get_group(int groupid, AddressSpace *as, Error **errp)
     }
 
     QLIST_INSERT_HEAD(&vfio_group_list, group, next);
+    cpr_resave_fd("vfio_group", groupid, group->fd);
 
     return group;
 
@@ -2540,6 +2681,7 @@ void vfio_put_group(VFIOGroup *group)
     vfio_disconnect_container(group);
     QLIST_REMOVE(group, next);
     trace_vfio_put_group(group->fd);
+    cpr_delete_fd("vfio_group", group->groupid);
     close(group->fd);
     g_free(group);
 
@@ -2553,8 +2695,14 @@ int vfio_get_device(VFIOGroup *group, const char *name,
 {
     struct vfio_device_info dev_info = { .argsz = sizeof(dev_info) };
     int ret, fd;
+    bool reused;
 
-    fd = ioctl(group->fd, VFIO_GROUP_GET_DEVICE_FD, name);
+    fd = cpr_find_fd(name, 0);
+    reused = (fd >= 0);
+    if (!reused) {
+        fd = ioctl(group->fd, VFIO_GROUP_GET_DEVICE_FD, name);
+    }
+
     if (fd < 0) {
         error_setg_errno(errp, errno, "error getting device from group %d",
                          group->groupid);
@@ -2599,11 +2747,13 @@ int vfio_get_device(VFIOGroup *group, const char *name,
     vbasedev->num_irqs = dev_info.num_irqs;
     vbasedev->num_regions = dev_info.num_regions;
     vbasedev->flags = dev_info.flags;
+    vbasedev->reused = reused;
 
     trace_vfio_get_device(name, dev_info.flags, dev_info.num_regions,
                           dev_info.num_irqs);
 
     vbasedev->reset_works = !!(dev_info.flags & VFIO_DEVICE_FLAGS_RESET);
+    cpr_resave_fd(name, 0, fd);
     return 0;
 }
 
@@ -2615,6 +2765,7 @@ void vfio_put_base_device(VFIODevice *vbasedev)
     QLIST_REMOVE(vbasedev, next);
     vbasedev->group = NULL;
     trace_vfio_put_base_device(vbasedev->fd);
+    cpr_delete_fd(vbasedev->name, 0);
     close(vbasedev->fd);
 }
 

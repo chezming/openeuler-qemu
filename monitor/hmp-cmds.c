@@ -42,6 +42,7 @@
 #include "qapi/qapi-commands-run-state.h"
 #include "qapi/qapi-commands-tpm.h"
 #include "qapi/qapi-commands-ui.h"
+#include "qapi/util.h"
 #include "qapi/qapi-visit-net.h"
 #include "qapi/qapi-visit-migration.h"
 #include "qapi/qmp/qdict.h"
@@ -68,32 +69,6 @@ bool hmp_handle_error(Monitor *mon, Error *err)
         return true;
     }
     return false;
-}
-
-/*
- * Produce a strList from a comma separated list.
- * A NULL or empty input string return NULL.
- */
-static strList *strList_from_comma_list(const char *in)
-{
-    strList *res = NULL;
-    strList **tail = &res;
-
-    while (in && in[0]) {
-        char *comma = strchr(in, ',');
-        char *value;
-
-        if (comma) {
-            value = g_strndup(in, comma - in);
-            in = comma + 1; /* skip the , */
-        } else {
-            value = g_strdup(in);
-            in = NULL;
-        }
-        QAPI_LIST_APPEND(tail, value);
-    }
-
-    return res;
 }
 
 void hmp_info_name(Monitor *mon, const QDict *qdict)
@@ -394,6 +369,18 @@ void hmp_info_migrate_capabilities(Monitor *mon, const QDict *qdict)
     qapi_free_MigrationCapabilityStatusList(caps);
 }
 
+static void monitor_print_cpr_exec_args(Monitor *mon, strList *args)
+{
+    monitor_printf(mon, "%s:",
+        MigrationParameter_str(MIGRATION_PARAMETER_CPR_EXEC_ARGS));
+
+    while (args) {
+        monitor_printf(mon, " %s", args->value);
+        args = args->next;
+    }
+    monitor_printf(mon, "\n");
+}
+
 void hmp_info_migrate_parameters(Monitor *mon, const QDict *qdict)
 {
     MigrationParameters *params;
@@ -413,6 +400,10 @@ void hmp_info_migrate_parameters(Monitor *mon, const QDict *qdict)
         monitor_printf(mon, "%s: %" PRIu64 " ms\n",
             MigrationParameter_str(MIGRATION_PARAMETER_ANNOUNCE_STEP),
             params->announce_step);
+        assert(params->has_mode);
+        monitor_printf(mon, "%s: %s\n",
+            MigrationParameter_str(MIGRATION_PARAMETER_MODE),
+            qapi_enum_lookup(&MigMode_lookup, params->mode));
         assert(params->has_compress_level);
         monitor_printf(mon, "%s: %u\n",
             MigrationParameter_str(MIGRATION_PARAMETER_COMPRESS_LEVEL),
@@ -452,6 +443,8 @@ void hmp_info_migrate_parameters(Monitor *mon, const QDict *qdict)
         monitor_printf(mon, "%s: %u\n",
             MigrationParameter_str(MIGRATION_PARAMETER_MAX_CPU_THROTTLE),
             params->max_cpu_throttle);
+        assert(params->has_cpr_exec_args);
+        monitor_print_cpr_exec_args(mon, params->cpr_exec_args);
         assert(params->has_tls_creds);
         monitor_printf(mon, "%s: '%s'\n",
             MigrationParameter_str(MIGRATION_PARAMETER_TLS_CREDS),
@@ -1106,7 +1099,7 @@ void hmp_announce_self(Monitor *mon, const QDict *qdict)
                                             migrate_announce_params());
 
     qapi_free_strList(params->interfaces);
-    params->interfaces = strList_from_comma_list(interfaces_str);
+    params->interfaces = strList_from_string(interfaces_str, ',');
     params->has_interfaces = params->interfaces != NULL;
     params->id = g_strdup(id);
     params->has_id = !!params->id;
@@ -1197,6 +1190,7 @@ void hmp_migrate_set_parameter(Monitor *mon, const QDict *qdict)
     uint64_t cache_size;
     CompressMethod compress_method;
     Error *err = NULL;
+    g_autofree char *str = NULL;
     int val, ret;
 
     val = qapi_enum_parse(&MigrationParameter_lookup, param, -1, &err);
@@ -1205,6 +1199,10 @@ void hmp_migrate_set_parameter(Monitor *mon, const QDict *qdict)
     }
 
     switch (val) {
+    case MIGRATION_PARAMETER_MODE:
+        p->has_mode = true;
+        visit_type_MigMode(v, param, &p->mode, &err);
+        break;
     case MIGRATION_PARAMETER_COMPRESS_LEVEL:
         p->has_compress_level = true;
         visit_type_uint8(v, param, &p->compress_level, &err);
@@ -1248,6 +1246,11 @@ void hmp_migrate_set_parameter(Monitor *mon, const QDict *qdict)
     case MIGRATION_PARAMETER_MAX_CPU_THROTTLE:
         p->has_max_cpu_throttle = true;
         visit_type_uint8(v, param, &p->max_cpu_throttle, &err);
+        break;
+    case MIGRATION_PARAMETER_CPR_EXEC_ARGS:
+        p->has_cpr_exec_args = true;
+        visit_type_str(v, param, &str, &err);
+        p->cpr_exec_args = strList_from_string(str, ' ');
         break;
     case MIGRATION_PARAMETER_TLS_CREDS:
         p->has_tls_creds = true;

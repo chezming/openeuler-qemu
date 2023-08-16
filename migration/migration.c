@@ -20,6 +20,7 @@
 #include "migration/blocker.h"
 #include "exec.h"
 #include "fd.h"
+#include "file.h"
 #include "socket.h"
 #include "sysemu/runstate.h"
 #include "sysemu/sysemu.h"
@@ -32,6 +33,7 @@
 #include "savevm.h"
 #include "qemu-file-channel.h"
 #include "qemu-file.h"
+#include "migration/cpr.h"
 #include "migration/vmstate.h"
 #include "block/block.h"
 #include "qapi/error.h"
@@ -171,8 +173,9 @@ INITIALIZE_MIGRATE_CAPS_SET(check_caps_background_snapshot,
 
 static MigrationState *current_migration;
 static MigrationIncomingState *current_incoming;
+static int migrate_enabled_modes = BIT(MIG_MODE_NORMAL);
 
-static GSList *migration_blockers;
+static GSList *migration_blockers[MIG_MODE__MAX];
 
 static bool migration_object_check(MigrationState *ms, Error **errp);
 static int migration_maybe_pause(MigrationState *s,
@@ -187,12 +190,17 @@ static gint page_request_addr_cmp(gconstpointer ap, gconstpointer bp)
     return (a > b) - (a < b);
 }
 
-void migration_object_init(void)
+void migration_object_early_init(void)
 {
     /* This can only be called once. */
     assert(!current_migration);
     current_migration = MIGRATION_OBJ(object_new(TYPE_MIGRATION));
 
+    cpr_init();
+}
+
+void migration_object_init(void)
+{
     /*
      * Init the migrate incoming object as well no matter whether
      * we'll use it or not.
@@ -472,6 +480,8 @@ static void qemu_start_incoming_migration(const char *uri, Error **errp)
         exec_start_incoming_migration(p, errp);
     } else if (strstart(uri, "fd:", &p)) {
         fd_start_incoming_migration(p, errp);
+    } else if (strstart(uri, "file:", &p)) {
+        file_start_incoming_migration(p, errp);
     } else {
         error_setg(errp, "unknown migration protocol: %s", uri);
     }
@@ -517,6 +527,12 @@ static void process_incoming_migration_bh(void *opaque)
 
     dirty_bitmap_mig_before_vm_start();
 
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        cpr_exec_complete_notify();
+        /* After qemu live update, no need to call handler anymore */
+        qemu_del_all_cpr_exec_complete_handler();
+    }
+
     if (!global_state_received() ||
         global_state_get_runstate() == RUN_STATE_RUNNING) {
         if (autostart) {
@@ -529,6 +545,10 @@ static void process_incoming_migration_bh(void *opaque)
         vm_start();
     } else {
         runstate_set(global_state_get_runstate());
+        if (runstate_check(RUN_STATE_SUSPENDED)) {
+            /* Force vm_start to be called later. */
+            qemu_system_start_on_wakeup_request();
+        }
     }
     /*
      * This must happen after any state changes since as soon as an external
@@ -539,6 +559,12 @@ static void process_incoming_migration_bh(void *opaque)
                       MIGRATION_STATUS_COMPLETED);
     qemu_bh_delete(mis->bh);
     migration_incoming_state_destroy();
+
+	/* After qemu live update, set the migration mode to normal */
+	if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+		MigrationState *s = migrate_get_current();
+		s->parameters.mode = MIG_MODE_NORMAL;
+	}
 }
 
 static void process_incoming_migration_co(void *opaque)
@@ -848,6 +874,8 @@ MigrationParameters *qmp_query_migrate_parameters(Error **errp)
 
     /* TODO use QAPI_CLONE() instead of duplicating it inline */
     params = g_malloc0(sizeof(*params));
+    params->has_mode = true;
+    params->mode = s->parameters.mode;
     params->has_compress_level = true;
     params->compress_level = s->parameters.compress_level;
     params->has_compress_threads = true;
@@ -866,6 +894,8 @@ MigrationParameters *qmp_query_migrate_parameters(Error **errp)
     params->cpu_throttle_increment = s->parameters.cpu_throttle_increment;
     params->has_cpu_throttle_tailslow = true;
     params->cpu_throttle_tailslow = s->parameters.cpu_throttle_tailslow;
+    params->has_cpr_exec_args = true;
+    params->cpr_exec_args = QAPI_CLONE(strList, s->parameters.cpr_exec_args);
     params->has_tls_creds = true;
     params->tls_creds = g_strdup(s->parameters.tls_creds);
     params->has_tls_hostname = true;
@@ -1059,7 +1089,7 @@ static void populate_disk_info(MigrationInfo *info)
 static void fill_source_migration_info(MigrationInfo *info)
 {
     MigrationState *s = migrate_get_current();
-    GSList *cur_blocker = migration_blockers;
+    GSList *cur_blocker = migration_blockers[migrate_mode()];
 
     info->blocked_reasons = NULL;
 
@@ -1251,6 +1281,11 @@ static bool migrate_caps_check(bool *cap_list,
         cap_list[MIGRATION_CAPABILITY_MULTIFD]) {
         error_setg(errp, "multifd is not supported by current protocol");
         return false;
+    }
+
+    if (cap_list[MIGRATION_CAPABILITY_X_COLO]) {
+        return migrate_add_blocker_always("x-colo is not compatible with cpr",
+                                          errp, MIG_MODE_CPR_EXEC, -1);
     }
 
     return true;
@@ -1504,6 +1539,10 @@ static void migrate_params_test_apply(MigrateSetParameters *params,
 
     /* TODO use QAPI_CLONE() instead of duplicating it inline */
 
+    if (params->has_mode) {
+        dest->mode = params->mode;
+    }
+
     if (params->has_compress_level) {
         dest->compress_level = params->compress_level;
     }
@@ -1538,6 +1577,10 @@ static void migrate_params_test_apply(MigrateSetParameters *params,
 
     if (params->has_cpu_throttle_tailslow) {
         dest->cpu_throttle_tailslow = params->cpu_throttle_tailslow;
+    }
+
+    if (params->has_cpr_exec_args) {
+        dest->cpr_exec_args = params->cpr_exec_args;
     }
 
     if (params->has_tls_creds) {
@@ -1605,6 +1648,10 @@ static void migrate_params_apply(MigrateSetParameters *params, Error **errp)
 
     /* TODO use QAPI_CLONE() instead of duplicating it inline */
 
+    if (params->has_mode) {
+        s->parameters.mode = params->mode;
+    }
+
     if (params->has_compress_level) {
         s->parameters.compress_level = params->compress_level;
     }
@@ -1639,6 +1686,12 @@ static void migrate_params_apply(MigrateSetParameters *params, Error **errp)
 
     if (params->has_cpu_throttle_tailslow) {
         s->parameters.cpu_throttle_tailslow = params->cpu_throttle_tailslow;
+    }
+
+    if (params->has_cpr_exec_args) {
+        qapi_free_strList(s->parameters.cpr_exec_args);
+        s->parameters.cpr_exec_args =
+            QAPI_CLONE(strList, params->cpr_exec_args);
     }
 
     if (params->has_tls_creds) {
@@ -1826,6 +1879,8 @@ static void block_cleanup_parameters(MigrationState *s)
 
 static void migrate_fd_cleanup(MigrationState *s)
 {
+    bool already_failed;
+
     qemu_bh_delete(s->cleanup_bh);
     s->cleanup_bh = NULL;
 
@@ -1866,8 +1921,17 @@ static void migrate_fd_cleanup(MigrationState *s)
         /* It is used on info migrate.  We can't free it */
         error_report_err(error_copy(s->error));
     }
-    notifier_list_notify(&migration_state_notifiers, s);
+
+    already_failed = migration_has_failed(s);
+    if (migration_call_notifiers(s)) {
+        if (!already_failed) {
+            migrate_set_state(&s->state, s->state, MIGRATION_STATUS_FAILED);
+            /* Notify again to recover from this late failure. */
+            migration_call_notifiers(s);
+        }
+    }
     block_cleanup_parameters(s);
+    cpr_exec();
     yank_unregister_instance(MIGRATION_YANK_INSTANCE);
 }
 
@@ -1961,14 +2025,31 @@ static void migrate_fd_cancel(MigrationState *s)
     }
 }
 
-void add_migration_state_change_notifier(Notifier *notify)
+void migration_add_notifier(Notifier *notify,
+                            void (*func)(Notifier *notifier, void *data))
 {
+    notify->notify = func;
     notifier_list_add(&migration_state_notifiers, notify);
 }
 
-void remove_migration_state_change_notifier(Notifier *notify)
+void migration_remove_notifier(Notifier *notify)
 {
-    notifier_remove(notify);
+    if (notify->notify) {
+        notifier_remove(notify);
+        notify->notify = NULL;
+    }
+}
+
+int migration_call_notifiers(MigrationState *s)
+{
+    notifier_list_notify(&migration_state_notifiers, s);
+    return (s->error != NULL);
+}
+
+void migration_notifier_set_error(MigrationState *s, Error *err)
+{
+    migrate_set_error(s, err);
+    error_report_err(err);
 }
 
 bool migration_in_setup(MigrationState *s)
@@ -2057,6 +2138,34 @@ bool migration_is_active(MigrationState *s)
             s->state == MIGRATION_STATUS_POSTCOPY_ACTIVE);
 }
 
+void migrate_enable_mode(MigMode mode)
+{
+    migrate_enabled_modes |= BIT(mode);
+}
+
+bool migrate_mode_enabled(MigMode mode)
+{
+    return !!(migrate_enabled_modes & BIT(mode));
+}
+
+static bool migrate_modes_enabled(int modes)
+{
+    return (modes & migrate_enabled_modes) == modes;
+}
+
+static int migrate_check_enabled(Error **errp)
+{
+    MigMode mode = migrate_mode();
+
+    if (!migrate_mode_enabled(mode)) {
+        error_setg(errp, "migrate mode is not enabled.  "
+                         "Use '-migrate-mode-enable %s'.",
+                   MigMode_str(mode));
+        return -1;
+    }
+    return 0;
+}
+
 void migrate_init(MigrationState *s)
 {
     /*
@@ -2091,35 +2200,121 @@ void migrate_init(MigrationState *s)
     s->threshold_size = 0;
 }
 
-int migrate_add_blocker_internal(Error *reason, Error **errp)
+static int add_blockers(Error **reasonp, Error **errp, int modes)
 {
+    MigMode mode;
+
     /* Snapshots are similar to migrations, so check RUN_STATE_SAVE_VM too. */
     if (runstate_check(RUN_STATE_SAVE_VM) || !migration_is_idle()) {
-        error_propagate_prepend(errp, error_copy(reason),
+        error_propagate_prepend(errp, *reasonp,
                                 "disallowing migration blocker "
                                 "(migration/snapshot in progress) for: ");
+        *reasonp = NULL;
         return -EBUSY;
     }
 
-    migration_blockers = g_slist_prepend(migration_blockers, reason);
+    for (mode = 0; mode < MIG_MODE__MAX; mode++) {
+        if (modes & BIT(mode)) {
+            migration_blockers[mode] = g_slist_prepend(migration_blockers[mode],
+                                                       *reasonp);
+        }
+    }
     return 0;
 }
 
-int migrate_add_blocker(Error *reason, Error **errp)
+static int check_blockers(Error **reasonp, Error **errp, int modes)
 {
-    if (only_migratable) {
-        error_propagate_prepend(errp, error_copy(reason),
+    ERRP_GUARD();
+
+    if (only_migratable && (modes & BIT(MIG_MODE_NORMAL))) {
+        error_propagate_prepend(errp, *reasonp,
                                 "disallowing migration blocker "
                                 "(--only-migratable) for: ");
+        *reasonp = NULL;
         return -EACCES;
     }
 
-    return migrate_add_blocker_internal(reason, errp);
+    if (only_cpr_capable && (modes & CPR_MODES) &&
+        migrate_modes_enabled(modes & CPR_MODES)) {
+        error_propagate_prepend(errp, *reasonp,
+                                "-only-cpr-capable specified, but: ");
+        *reasonp = NULL;
+        return -EACCES;
+    }
+
+    return add_blockers(reasonp, errp, modes);
 }
 
-void migrate_del_blocker(Error *reason)
+int migrate_add_blocker(Error **reasonp, Error **errp)
 {
-    migration_blockers = g_slist_remove(migration_blockers, reason);
+    return migrate_add_blockers(reasonp, errp, MIG_MODE_ALL);
+}
+
+int migrate_add_blocker_internal(Error **reasonp, Error **errp)
+{
+    int modes = BIT(MIG_MODE__MAX) - 1;
+
+    return add_blockers(reasonp, errp, modes);
+}
+
+static int get_modes(MigMode mode, va_list ap)
+{
+    int modes = 0;
+
+    while (mode != -1 && mode != MIG_MODE_ALL) {
+        assert(mode >= MIG_MODE_NORMAL && mode < MIG_MODE__MAX);
+        modes |= BIT(mode);
+        mode = va_arg(ap, MigMode);
+    }
+    if (mode == MIG_MODE_ALL) {
+        modes = BIT(MIG_MODE__MAX) - 1;
+    }
+    return modes;
+}
+
+int migrate_add_blockers(Error **reasonp, Error **errp, MigMode mode, ...)
+{
+    int modes;
+    va_list ap;
+
+    va_start(ap, mode);
+    modes = get_modes(mode, ap);
+    va_end(ap);
+
+    return check_blockers(reasonp, errp, modes);
+}
+
+int migrate_add_blocker_always(const char *msg, Error **errp, MigMode mode, ...)
+{
+    int modes;
+    va_list ap;
+    Error *reason = NULL;
+
+    va_start(ap, mode);
+    modes = get_modes(mode, ap);
+    va_end(ap);
+
+    error_setg(&reason, "%s", msg);
+    return check_blockers(&reason, errp, modes);
+}
+
+void migrate_del_blocker(Error **reasonp)
+{
+    if (*reasonp) {
+        migrate_remove_blocker(*reasonp);
+        error_free(*reasonp);
+        *reasonp = NULL;
+    }
+}
+
+void migrate_remove_blocker(Error *reason)
+{
+    if (reason) {
+        for (MigMode mode = 0; mode < MIG_MODE__MAX; mode++) {
+            migration_blockers[mode] = g_slist_remove(migration_blockers[mode],
+                                                      reason);
+        }
+    }
 }
 
 void qmp_migrate_incoming(const char *uri, Error **errp)
@@ -2127,6 +2322,9 @@ void qmp_migrate_incoming(const char *uri, Error **errp)
     Error *local_err = NULL;
     static bool once = true;
 
+    if (migrate_check_enabled(errp)) {
+        return;
+    }
     if (!once) {
         error_setg(errp, "The incoming migration has already been started");
         return;
@@ -2219,12 +2417,14 @@ void qmp_migrate_pause(Error **errp)
 
 bool migration_is_blocked(Error **errp)
 {
+    GSList *blockers = migration_blockers[migrate_mode()];
+
     if (qemu_savevm_state_blocked(errp)) {
         return true;
     }
 
-    if (migration_blockers) {
-        error_propagate(errp, error_copy(migration_blockers->data));
+    if (blockers) {
+        error_propagate(errp, error_copy(blockers->data));
         return true;
     }
 
@@ -2279,6 +2479,16 @@ static bool migrate_prepare(MigrationState *s, bool blk, bool blk_inc,
     if (runstate_check(RUN_STATE_POSTMIGRATE)) {
         error_setg(errp, "Can't migrate the vm that was paused due to "
                    "previous migration");
+        return false;
+    }
+
+    if (migrate_check_enabled(errp)) {
+        return false;
+    }
+
+    if (migrate_mode_of(s) == MIG_MODE_CPR_EXEC &&
+        !s->parameters.has_cpr_exec_args) {
+        error_setg(errp, "cpr-exec mode requires setting cpr-exec-args");
         return false;
     }
 
@@ -2353,6 +2563,8 @@ void qmp_migrate(const char *uri, bool has_blk, bool blk,
         exec_start_outgoing_migration(s, p, &local_err);
     } else if (strstart(uri, "fd:", &p)) {
         fd_start_outgoing_migration(s, p, &local_err);
+    } else if (strstart(uri, "file:", &p)) {
+        file_start_outgoing_migration(s, p, &local_err);
     } else {
         if (!(has_resume && resume)) {
             yank_unregister_instance(MIGRATION_YANK_INSTANCE);
@@ -2584,6 +2796,20 @@ int migrate_multifd_zstd_level(void)
     s = migrate_get_current();
 
     return s->parameters.multifd_zstd_level;
+}
+
+MigMode migrate_mode(void)
+{
+    MigrationState *s;
+
+    s = migrate_get_current();
+
+    return s->parameters.mode;
+}
+
+MigMode migrate_mode_of(MigrationState *s)
+{
+    return s->parameters.mode;
 }
 
 int migrate_use_xbzrle(void)
@@ -2997,7 +3223,6 @@ static int postcopy_start(MigrationState *ms)
     qemu_mutex_lock_iothread();
     trace_postcopy_start_set_run();
 
-    qemu_system_wakeup_request(QEMU_WAKEUP_REASON_OTHER, NULL);
     global_state_store();
     ret = vm_stop_force_state(RUN_STATE_FINISH_MIGRATE);
     if (ret < 0) {
@@ -3105,7 +3330,9 @@ static int postcopy_start(MigrationState *ms)
      * spice needs to trigger a transition now
      */
     ms->postcopy_after_devices = true;
-    notifier_list_notify(&migration_state_notifiers, ms);
+    if (migration_call_notifiers(ms)) {
+        goto fail;
+    }
 
     ms->downtime =  qemu_clock_get_ms(QEMU_CLOCK_REALTIME) - time_at_stop;
 
@@ -3209,7 +3436,6 @@ static void migration_completion(MigrationState *s)
     if (s->state == MIGRATION_STATUS_ACTIVE) {
         qemu_mutex_lock_iothread();
         s->downtime_start = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
-        qemu_system_wakeup_request(QEMU_WAKEUP_REASON_OTHER, NULL);
         s->vm_was_running = runstate_is_running();
         ret = global_state_store();
 
@@ -3986,11 +4212,6 @@ static void *bg_migration_thread(void *opaque)
 
     qemu_mutex_lock_iothread();
 
-    /*
-     * If VM is currently in suspended state, then, to make a valid runstate
-     * transition in vm_stop_force_state() we need to wakeup it up.
-     */
-    qemu_system_wakeup_request(QEMU_WAKEUP_REASON_OTHER, NULL);
     s->vm_was_running = runstate_is_running();
 
     if (global_state_store()) {
@@ -4116,7 +4337,11 @@ void migrate_fd_connect(MigrationState *s, Error *error_in)
         rate_limit = s->parameters.max_bandwidth / XFER_LIMIT_RATIO;
 
         /* Notify before starting migration thread */
-        notifier_list_notify(&migration_state_notifiers, s);
+        if (migration_call_notifiers(s)) {
+            migrate_set_state(&s->state, s->state, MIGRATION_STATUS_FAILED);
+            migrate_fd_cleanup(s);
+            return;
+        }
     }
 
     qemu_file_set_rate_limit(s->to_dst_file, rate_limit);
@@ -4197,6 +4422,9 @@ static Property migration_properties[] = {
                       clear_bitmap_shift, CLEAR_BITMAP_SHIFT_DEFAULT),
 
     /* Migration parameters */
+    DEFINE_PROP_MIG_MODE("mode", MigrationState,
+                      parameters.mode,
+                      MIG_MODE_NORMAL),
     DEFINE_PROP_UINT8("x-compress-level", MigrationState,
                       parameters.compress_level,
                       DEFAULT_MIGRATE_COMPRESS_LEVEL),
@@ -4222,6 +4450,8 @@ static Property migration_properties[] = {
                       DEFAULT_MIGRATE_CPU_THROTTLE_INCREMENT),
     DEFINE_PROP_BOOL("x-cpu-throttle-tailslow", MigrationState,
                       parameters.cpu_throttle_tailslow, false),
+    DEFINE_PROP_STRLIST("cpr-exec-args", MigrationState,
+                      parameters.cpr_exec_args),
     DEFINE_PROP_SIZE("x-max-bandwidth", MigrationState,
                       parameters.max_bandwidth, MAX_THROTTLE),
     DEFINE_PROP_UINT64("x-downtime-limit", MigrationState,
@@ -4324,11 +4554,13 @@ static void migration_instance_init(Object *obj)
     params->tls_creds = g_strdup("");
 
     /* Set has_* up only for parameter checks */
+    params->has_mode = true;
     params->has_compress_level = true;
     params->has_compress_threads = true;
     params->has_decompress_threads = true;
     params->has_compress_method = true;
     params->has_throttle_trigger_threshold = true;
+    params->has_cpr_exec_args = true;
     params->has_cpu_throttle_initial = true;
     params->has_cpu_throttle_increment = true;
     params->has_cpu_throttle_tailslow = true;
