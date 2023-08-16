@@ -559,6 +559,12 @@ static void process_incoming_migration_bh(void *opaque)
                       MIGRATION_STATUS_COMPLETED);
     qemu_bh_delete(mis->bh);
     migration_incoming_state_destroy();
+
+	/* After qemu live update, set the migration mode to normal */
+	if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+		MigrationState *s = migrate_get_current();
+		s->parameters.mode = MIG_MODE_NORMAL;
+	}
 }
 
 static void process_incoming_migration_co(void *opaque)
