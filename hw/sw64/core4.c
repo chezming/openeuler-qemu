@@ -18,9 +18,11 @@
 #include "hw/char/serial.h"
 #include "qemu/cutils.h"
 #include "ui/console.h"
-#include "core.h"
+#include "hw/sw64/core.h"
 #include "hw/boards.h"
 #include "sysemu/numa.h"
+
+unsigned long core4_init_pc = 0xfff0000000011002;
 
 static uint64_t cpu_sw64_virt_to_phys(void *opaque, uint64_t addr)
 {
@@ -49,7 +51,6 @@ static void core4_init(MachineState *machine)
     uint64_t kernel_entry, kernel_low, kernel_high;
     BOOT_PARAMS *core4_boot_params = g_new0(BOOT_PARAMS, 1);
     uint64_t param_offset;
-
     memset(cpus, 0, sizeof(cpus));
 
     for (i = 0; i < machine->smp.cpus; ++i) {

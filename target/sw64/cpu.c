@@ -267,6 +267,9 @@ static void sw64_cpu_do_transaction_failed(CPUState *cs, hwaddr physaddr, vaddr 
                               int mmu_idx, MemTxAttrs attrs,
                               MemTxResult response, uintptr_t retaddr)
 {
+    SW64CPU *cpu = SW64_CPU(cs);
+    CPUSW64State *env = &cpu->env;
+
 #ifdef DEBUG_TRANS
     if (retaddr) {
         cpu_restore_state(cs, retaddr, true);

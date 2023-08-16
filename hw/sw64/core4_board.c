@@ -1,7 +1,7 @@
 #include "qemu/osdep.h"
 #include "qapi/error.h"
 #include "cpu.h"
-#include "core.h"
+#include "hw/sw64/core.h"
 #include "hw/hw.h"
 #include "hw/boards.h"
 #include "sysemu/sysemu.h"

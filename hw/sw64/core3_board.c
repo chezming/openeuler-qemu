@@ -1,7 +1,7 @@
 #include "qemu/osdep.h"
 #include "qapi/error.h"
 #include "cpu.h"
-#include "core.h"
+#include "hw/sw64/core.h"
 #include "hw/hw.h"
 #include "hw/boards.h"
 #include "sysemu/sysemu.h"
@@ -255,7 +255,7 @@ static void intpu_write(void *opaque, hwaddr addr, uint64_t val,
     SW64CPU *cpu;
     switch (addr) {
     case 0x00:
-        val &= 0x1f;
+        val &= 0x3f;
 	cpu = bs->sboard.cpu[val];
 	cpu->env.csr[II_REQ] = 0x100000;
 	cpu_interrupt(CPU(cpu),CPU_INTERRUPT_II0);

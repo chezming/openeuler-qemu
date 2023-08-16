@@ -23,6 +23,7 @@
 #include "exec/memattrs.h"
 #include "exec/address-spaces.h"
 #include "hw/boards.h"
+#include "hw/sw64/core.h"
 #include "qemu/log.h"
 
 const KVMCapabilityInfo kvm_arch_required_capabilities[] = {
@@ -33,8 +34,12 @@ int kvm_sw64_vcpu_init(CPUState *cs)
 {
     struct kvm_regs *regs;
     SW64CPU *cpu = SW64_CPU(cs);
+    CPUSW64State *env = cs->env_ptr;
     regs = (struct kvm_regs *)cpu->k_regs;
-    regs->pc = init_pc;
+    if (test_feature(env, SW64_FEATURE_CORE3))
+        regs->pc = core3_init_pc;
+    else if (test_feature(env, SW64_FEATURE_CORE4))
+	regs->pc = core4_init_pc;
     return kvm_vcpu_ioctl(cs, KVM_SET_REGS, &regs);
 }
 
@@ -68,21 +73,22 @@ int kvm_arch_init(MachineState *ms, KVMState *s)
 void kvm_sw64_reset_vcpu(SW64CPU *cpu)
 {
     CPUState *cs = CPU(cpu);
+    CPUSW64State *env = cs->env_ptr;
     struct kvm_regs *regs;
     int ret;
 
     regs = (struct kvm_regs *)cpu->k_regs;
-    regs->pc = init_pc;
-
+    if (test_feature(env, SW64_FEATURE_CORE3))
+        regs->pc = core3_init_pc;
+    else if (test_feature(env, SW64_FEATURE_CORE4))
+        regs->pc = core4_init_pc;
     ret = kvm_vcpu_ioctl(cs, KVM_SET_REGS, &regs);
-
     if (ret < 0) {
         fprintf(stderr, "kvm_sw64_vcpu_init failed: %s\n", strerror(-ret));
         abort();
     }
 
     ret = kvm_vcpu_ioctl(cs, KVM_SW64_VCPU_INIT, NULL);
-
     if (ret < 0) {
         fprintf(stderr, "kvm_sw64_vcpu_init failed: %s\n", strerror(-ret));
         abort();

@@ -22,14 +22,13 @@
 #include "hw/char/serial.h"
 #include "qemu/cutils.h"
 #include "ui/console.h"
-#include "core.h"
+#include "hw/sw64/core.h"
 #include "hw/boards.h"
 #include "sysemu/numa.h"
 #include "qemu/uuid.h"
 #include "qemu/bswap.h"
-
+unsigned long core3_init_pc = 0xfff0000000011100;
 #define VMUUID 0xFF40
-
 static uint64_t cpu_sw64_virt_to_phys(void *opaque, uint64_t addr)
 {
     return addr &= ~0xffffffff80000000 ;
@@ -103,7 +102,6 @@ static void core3_init(MachineState *machine)
     BOOT_PARAMS *core3_boot_params = g_new0(BOOT_PARAMS, 1);
     uint64_t param_offset;
     QemuUUID uuid_out_put;
-
     memset(cpus, 0, sizeof(cpus));
 
     for (i = 0; i < machine->smp.cpus; ++i) {
@@ -147,7 +145,7 @@ static void core3_init(MachineState *machine)
     /* Start all cpus at the hmcode RESET entry point.  */
     for (i = 0; i < machine->smp.cpus; ++i) {
 	if (kvm_enabled())
-	    cpus[i]->env.pc = init_pc;
+	    cpus[i]->env.pc = core3_init_pc;
 	else
 	    cpus[i]->env.pc = hmcode_entry;
         cpus[i]->env.hm_entry = hmcode_entry;
