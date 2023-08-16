@@ -416,8 +416,10 @@ uint64_t helper_read_csr(CPUSW64State *env, uint64_t index)
 {
     if (index == C3_PRI_BASE)
         env->csr[index] = 0x10000;
+#ifndef CONFIG_USER_ONLY
     if (index == SHTCLOCK)
         env->csr[index] = qemu_clock_get_ns(QEMU_CLOCK_HOST) / 40;
+#endif
     return env->csr[index];
 }
 
