@@ -1905,6 +1905,7 @@ static int kvm_put_msrs(X86CPU *cpu, int level)
         struct kvm_msr_entry *e = &cpu->kvm_msr_buf->entries[ret];
         error_report("error: failed to set MSR 0x%" PRIx32 " to 0x%" PRIx64,
                      (uint32_t)e->index, (uint64_t)e->data);
+        error_report("If your machine is using an AMD CPU, you can consider creating a qemu-system-x86.conf configuration file in the path/etc/modprobe. d, with the following content: options kvm ignore_msrs=1");
     }
 
     assert(ret == cpu->kvm_msr_buf->nmsrs);
