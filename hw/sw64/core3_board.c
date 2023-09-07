@@ -555,7 +555,7 @@ void core3_board_init(SW64CPU *cpus[MAX_CPUS], MemoryRegion *ram)
                           "sw64-rtc", 0x08ULL);
     memory_region_add_subregion(get_system_memory(), 0x804910000000ULL,
                                 io_rtc);
-#ifdef SW64_VT_IOMMU
+#ifdef CONFIG_SW64_VT_IOMMU
     sw64_vt_iommu_init(b);
 #endif
     for (i = 0; i < nb_nics; i++) {

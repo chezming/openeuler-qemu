@@ -194,107 +194,6 @@ EXTRA_LDFLAGS=""
 # Distributions want to ensure that several features are compiled in, and it
 # is impossible without a --enable-foo that exits if a feature is not found.
 default_feature=""
-# parse CC options second
-for opt do
-  optarg=$(expr "x$opt" : 'x[^=]*=\(.*\)')
-  case "$opt" in
-      --without-default-features)
-          default_feature="no"
-  ;;
-  esac
-done
-
-EXTRA_CFLAGS=""
-EXTRA_CXXFLAGS=""
-EXTRA_LDFLAGS=""
-
-xen_ctrl_version="$default_feature"
-xfs="$default_feature"
-membarrier="$default_feature"
-vhost_kernel="$default_feature"
-vhost_net="$default_feature"
-vhost_crypto="$default_feature"
-vhost_scsi="$default_feature"
-vhost_vsock="$default_feature"
-vhost_user="no"
-vhost_user_fs="$default_feature"
-vhost_vdpa="$default_feature"
-rdma="$default_feature"
-pvrdma="$default_feature"
-gprof="no"
-debug_tcg="no"
-debug="no"
-sanitizers="no"
-tsan="no"
-fortify_source="$default_feature"
-strip_opt="yes"
-mingw32="no"
-gcov="no"
-EXESUF=""
-modules="no"
-module_upgrades="no"
-prefix="/usr/local"
-qemu_suffix="qemu"
-bsd="no"
-linux="no"
-solaris="no"
-profiler="no"
-softmmu="yes"
-linux_user="no"
-bsd_user="no"
-pkgversion=""
-pie=""
-qom_cast_debug="yes"
-trace_backends="log"
-trace_file="trace"
-opengl="$default_feature"
-cpuid_h="no"
-avx2_opt="$default_feature"
-guest_agent="$default_feature"
-guest_agent_with_vss="no"
-guest_agent_ntddscsi="no"
-vss_win32_sdk="$default_feature"
-win_sdk="no"
-want_tools="$default_feature"
-coroutine=""
-coroutine_pool="$default_feature"
-debug_stack_usage="no"
-crypto_afalg="no"
-tls_priority="NORMAL"
-tpm="$default_feature"
-libssh="$default_feature"
-live_block_migration=${default_feature:-yes}
-numa="$default_feature"
-replication=${default_feature:-yes}
-bochs=${default_feature:-yes}
-cloop=${default_feature:-yes}
-dmg=${default_feature:-yes}
-qcow1=${default_feature:-yes}
-vdi=${default_feature:-yes}
-vvfat=${default_feature:-yes}
-qed=${default_feature:-yes}
-parallels=${default_feature:-yes}
-debug_mutex="no"
-plugins="$default_feature"
-rng_none="no"
-secret_keyring="$default_feature"
-meson=""
-meson_args=""
-ninja=""
-gio="$default_feature"
-skip_meson=no
-slirp_smbd="$default_feature"
-
-# The following Meson options are handled manually (still they
-# are included in the automatically generated help message)
-
-# 1. Track which submodules are needed
-capstone="auto"
-fdt="auto"
-slirp="auto"
-
-# 2. Support --with/--without option
-default_devices="true"
 
 for opt do
   optarg=$(expr "x$opt" : 'x[^=]*=\(.*\)')
@@ -866,6 +765,10 @@ for opt do
   # Pass through -Dxxxx options to meson
   -D*) meson_options="$meson_options $opt"
   ;;
+  --disable-vt-iommu) vt_iommu="no"
+  ;;
+  --enable-vt-iommu) vt_iommu="yes"
+  ;;
   esac
 done
 
@@ -990,7 +893,7 @@ cat << EOF
   linux-user      all linux usermode emulation targets
   bsd-user        all BSD usermode emulation targets
   pie             Position Independent Executables
-
+  vt-iommu        vt-iommu device support
 NOTE: The object files are built at the place where configure is launched
 EOF
 exit 0

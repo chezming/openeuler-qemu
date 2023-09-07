@@ -1,2 +1,3 @@
 obj-y += core3.o core3_board.o
 obj-y += core4.o core4_board.o
+obj-s(CONFIG_SW64_VT_IOMMU) += sw64_iommu.o
