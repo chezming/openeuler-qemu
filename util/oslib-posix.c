@@ -293,7 +293,7 @@ int socket_set_fast_reuse(int fd)
 {
     int val = 1, ret;
 
-    ret = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR,
+    ret = setsockopt(fd, SOL_SOCKET, SO_REUSEPORT,
                      (const char *)&val, sizeof(val));
 
     assert(ret == 0);
