@@ -12,6 +12,7 @@
 #include "io/channel-file.h"
 #include "io/channel-util.h"
 #include "trace.h"
+#include "sysemu/runstate.h"
 
 void file_start_outgoing_migration(MigrationState *s, const char *filename,
                                    Error **errp)
@@ -32,6 +33,13 @@ void file_start_outgoing_migration(MigrationState *s, const char *filename,
     migration_channel_connect(s, ioc, NULL, NULL);
 }
 
+static void file_migrate_complete_unlink_file(void *opaque)
+{
+    char *filename = opaque;
+    unlink(filename);
+    g_free(filename);
+}
+
 static gboolean file_accept_incoming_migration(QIOChannel *ioc,
                                                GIOCondition condition,
                                                gpointer opaque)
@@ -45,6 +53,7 @@ void file_start_incoming_migration(const char *filename, Error **errp)
 {
     QIOChannelFile *fioc = NULL;
     QIOChannel *ioc;
+    char *filename_p;
 
     trace_migration_file_incoming(filename);
 
@@ -59,4 +68,12 @@ void file_start_incoming_migration(const char *filename, Error **errp)
                                file_accept_incoming_migration,
                                NULL, NULL,
                                g_main_context_get_thread_default());
+
+    /*
+     * Register Handler to delete VM state save file when
+     * qemu live update complete
+     */
+    filename_p = g_strdup_printf("%s", filename);
+    qemu_add_cpr_exec_complete_handler(file_migrate_complete_unlink_file,
+                                       (void *)filename_p);
 }
