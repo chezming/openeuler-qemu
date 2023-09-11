@@ -3515,6 +3515,8 @@ void qemu_init(int argc, char **argv, char **envp)
                     runstate_set(RUN_STATE_INMIGRATE);
                 }
                 incoming = optarg;
+                if (!strncmp(incoming, "file:", 5))
+                    cpr_exec_migrating = true;
                 break;
             case QEMU_OPTION_only_migratable:
                 only_migratable = 1;
