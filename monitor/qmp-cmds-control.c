@@ -24,6 +24,7 @@
 
 #include "qemu/osdep.h"
 
+#include "migration/cpr-state.h"
 #include "monitor-internal.h"
 #include "qemu-version.h"
 #include "qapi/compat-policy.h"
@@ -91,6 +92,21 @@ void qmp_qmp_capabilities(bool has_enable, QMPCapabilityList *enable,
     }
 
     mon->commands = &qmp_commands;
+
+    if (qemu_chr_cpr_support(cur_mon->chr.chr)) {
+        int i, fd;
+        char *name;
+
+        assert(sizeof(mon->capab) < sizeof(fd));
+        name = g_strdup_printf("qmp-%s", cur_mon->chr.chr->label);
+        memset(&fd, 0, sizeof(fd));
+        for (i = 0; i < QMP_CAPABILITY__MAX; i++) {
+            if (mon->capab[i])
+                fd |= 1 << i;
+        }
+        cpr_resave_fd(name, SPECIAL_ID, fd);
+        g_free(name);
+    }
 }
 
 VersionInfo *qmp_query_version(Error **errp)

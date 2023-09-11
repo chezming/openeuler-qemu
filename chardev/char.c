@@ -323,6 +323,7 @@ static void char_class_init(ObjectClass *oc, void *data)
 static void char_finalize(Object *obj)
 {
     Chardev *chr = CHARDEV(obj);
+    char *name;
 
     if (chr->be) {
         chr->be->chr = NULL;
@@ -330,7 +331,11 @@ static void char_finalize(Object *obj)
     if (chr->logfd != -1) {
         g_autofree char *fdname = g_strdup_printf("%s_log", chr->label);
         if (chr->cpr_enabled) {
+            name = g_strdup_printf("qmp-%s", chr->label);
             cpr_delete_fd(fdname, 0);
+            /* Delete qmp monitor */
+            cpr_delete_fd(name, SPECIAL_ID);
+            g_free(name);
         }
         close(chr->logfd);
     }

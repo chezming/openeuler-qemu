@@ -31,6 +31,8 @@
 #include "qapi/qmp/qdict.h"
 #include "qapi/qmp/qjson.h"
 #include "qapi/qmp/qlist.h"
+#include "migration/misc.h"
+#include "migration/cpr-state.h"
 #include "trace.h"
 
 struct QMPRequest {
@@ -57,6 +59,30 @@ static void monitor_qmp_caps_reset(MonitorQMP *mon)
     memset(mon->capab_offered, 0, sizeof(mon->capab_offered));
     memset(mon->capab, 0, sizeof(mon->capab));
     mon->capab_offered[QMP_CAPABILITY_OOB] = mon->common.use_io_thread;
+
+    /*
+     * The normal process is charmonitor Monitor commands is setted
+     * at qmp_qmp_capabilities() when interacting with libvirtd,
+     * but libvirtd do not support qemu live update reconnect yet,
+     * on cpr exec mode ,we will lose charmonitor Monitor commands
+     * setting, and a permission verificcation error will occurre on
+     * the connection between qemu and libvirtd.
+     */
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        char *name;
+        int i, fd;
+
+        name = g_strdup_printf("qmp-%s", mon->common.chr.chr->label);
+        fd = cpr_find_fd(name, SPECIAL_ID);
+        if (fd >= 0) {
+            mon->commands = &qmp_commands;
+            for (i = 0; i < QMP_CAPABILITY__MAX; i++) {
+                if (fd & (1 << i))
+                    mon->capab[i] = true;
+            }
+        }
+        g_free(name);
+    }
 }
 
 static void qmp_request_free(QMPRequest *req)
