@@ -15,6 +15,7 @@
 #include "qom/object_interfaces.h"
 #include "qemu/memfd.h"
 #include "migration/cpr-state.h"
+#include "migration/misc.h"
 #include "qemu/module.h"
 #include "qapi/error.h"
 #include "qom/object.h"
@@ -58,6 +59,8 @@ memfd_backend_memory_alloc(HostMemoryBackend *backend, Error **errp)
 
     ram_flags = backend->share ? RAM_SHARED : 0;
     ram_flags |= backend->reserve ? 0 : RAM_NORESERVE;
+    if (migrate_mode() == MIG_MODE_CPR_EXEC)
+        ram_flags |= RAM_MAP_FIXED;
     memory_region_init_ram_from_fd(&backend->mr, OBJECT(backend), name,
                                    backend->size, ram_flags, fd, 0, errp);
 }

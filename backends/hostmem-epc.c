@@ -18,6 +18,7 @@
 #include "sysemu/hostmem.h"
 #include "hw/i386/hostmem-epc.h"
 #include "migration/cpr-state.h"
+#include "migration/misc.h"
 
 static void
 sgx_epc_backend_memory_alloc(HostMemoryBackend *backend, Error **errp)
@@ -42,6 +43,8 @@ sgx_epc_backend_memory_alloc(HostMemoryBackend *backend, Error **errp)
     }
 
     ram_flags = (backend->share ? RAM_SHARED : 0) | RAM_PROTECTED;
+    if (migrate_mode() == MIG_MODE_CPR_EXEC)
+        ram_flags |= RAM_MAP_FIXED;
     memory_region_init_ram_from_fd(&backend->mr, OBJECT(backend),
                                    name, backend->size, ram_flags,
                                    fd, 0, errp);
