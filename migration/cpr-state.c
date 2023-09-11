@@ -130,7 +130,7 @@ int cpr_find_fd(const char *name, int id)
     CprName *elem = find_name(&cpr_state.fds, name, id);
     int fd = elem ? CPR_FD_FD(elem) : -1;
 
-    if (fd >= 0) {
+    if (fd >= 0 && id != SPECIAL_ID) {
         /* Set cloexec to prevent fd leaks from fork until the next cpr-exec */
         qemu_set_cloexec(fd);
     }

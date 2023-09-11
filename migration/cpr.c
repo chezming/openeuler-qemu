@@ -18,7 +18,8 @@ static Notifier cpr_fd_notifier;
 
 static int preserve_fd(const char *name, int id, int fd, void *opaque)
 {
-    qemu_clear_cloexec(fd);
+    if (id != SPECIAL_ID)
+        qemu_clear_cloexec(fd);
     return 0;
 }
 

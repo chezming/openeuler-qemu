@@ -10,6 +10,8 @@
 
 #include "qapi/qapi-types-migration.h"
 
+#define SPECIAL_ID    0XFFFF
+
 typedef int (*cpr_walk_fd_cb)(const char *name, int id, int fd, void *opaque);
 
 void cpr_save_fd(const char *name, int id, int fd);
