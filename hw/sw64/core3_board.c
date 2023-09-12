@@ -475,7 +475,7 @@ static void serial_set_irq(void *opaque, int irq, int level)
     }
 }
 
-void core3_board_init(SW64CPU *cpus[MAX_CPUS], MemoryRegion *ram)
+void core3_board_init(SW64CPU *cpus[MAX_CPUS_CORE3], MemoryRegion *ram)
 {
     DeviceState *dev;
     BoardState *bs;
