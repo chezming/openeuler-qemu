@@ -1240,9 +1240,6 @@ static uint64_t vfio_ascend_quirk_read(void *opaque,
     VFIOAscendBarQuirk *quirk = opaque;
     VFIOPCIDevice *vdev = quirk->vdev;
 
-    qemu_log("read RO region! addr=0x%" HWADDR_PRIx ", size=%d\n",
-            addr + quirk->offset, size);
-
     return vfio_region_read(&vdev->bars[quirk->bar].region,
                             addr + quirk->offset, size);
 }
@@ -1252,7 +1249,7 @@ static void vfio_ascend_quirk_write(void *opaque, hwaddr addr,
 {
     VFIOAscendBarQuirk *quirk = opaque;
 
-    qemu_log("modifying RO region is not allowed! addr=0x%"
+    qemu_log_mask(LOG_GUEST_ERROR, "modifying RO region is not allowed! addr=0x%"
             HWADDR_PRIx ", data=0x%" PRIx64 ", size=%d\n",
             addr + quirk->offset, data, size);
 }
