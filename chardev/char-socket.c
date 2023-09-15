@@ -1036,15 +1036,26 @@ static int tcp_chr_connect_client_sync(Chardev *chr, Error **errp)
     return 0;
 }
 
-
-static void tcp_chr_accept_server_sync(Chardev *chr)
+static void tcp_chr_accept_server_sync(Chardev *chr, Error **errp)
 {
     SocketChardev *s = SOCKET_CHARDEV(chr);
     QIOChannelSocket *sioc;
+    int fd;
     info_report("QEMU waiting for connection on: %s",
                 chr->filename);
     tcp_chr_change_state(s, TCP_CHARDEV_STATE_CONNECTING);
-    sioc = qio_net_listener_wait_client(s->listener);
+    if (migrate_mode() == MIG_MODE_CPR_EXEC &&
+        qemu_chr_has_feature(chr, QEMU_CHAR_FEATURE_CPR) &&
+        !chr->reopen_on_cpr) {
+        sioc = qio_net_listener_wait_client(s->listener, chr->label);
+        assert(sioc == NULL);
+        fd = cpr_find_fd(chr->label, 0);
+        assert(fd >= 0);
+        sioc = qio_channel_socket_new_fd(fd, errp);
+        assert(sioc != NULL);
+    } else {
+        sioc = qio_net_listener_wait_client(s->listener, chr->label);
+    }
     tcp_chr_set_client_ioc_name(chr, sioc);
     if (s->registered_yank) {
         yank_register_function(CHARDEV_YANK_INSTANCE(chr->label),
@@ -1124,7 +1135,7 @@ static int tcp_chr_wait_connected(Chardev *chr, Error **errp)
 
     while (s->state != TCP_CHARDEV_STATE_CONNECTED) {
         if (s->is_listen) {
-            tcp_chr_accept_server_sync(chr);
+            tcp_chr_accept_server_sync(chr, errp);
         } else {
             Error *err = NULL;
             if (tcp_chr_connect_client_sync(chr, &err) < 0) {
@@ -1317,7 +1328,7 @@ static int qmp_chardev_open_socket_server(Chardev *chr,
     update_disconnected_filename(s);
 
     if (is_waitconnect) {
-        tcp_chr_accept_server_sync(chr);
+        tcp_chr_accept_server_sync(chr, errp);
     } else {
         qio_net_listener_set_client_func_full(s->listener,
                                               tcp_chr_accept,
