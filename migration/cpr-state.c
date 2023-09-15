@@ -330,6 +330,13 @@ int cpr_state_load(Error **errp)
          * with libvirtd and acelerate qemu live update.
          */
         autostart = true;
+
+        eventnotifier_ptoc[0] = cpr_find_fd("eventnotifier_ptoc_0", 0);
+        eventnotifier_ctop[1] = cpr_find_fd("eventnotifier_ctop_1", 0);
+        if (eventnotifier_ptoc[0] < 0 || eventnotifier_ctop[1] < 0) {
+            error_setg(errp, "get eventnotifier failed");
+            exit(1);
+        }
     } else {
         error_setg(errp, "vmstate_load_state error %d", ret);
     }

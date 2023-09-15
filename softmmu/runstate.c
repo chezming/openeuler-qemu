@@ -36,6 +36,7 @@
 #include "migration/cpr.h"
 #include "migration/misc.h"
 #include "migration/postcopy-ram.h"
+#include "migration/migration.h"
 #include "monitor/monitor.h"
 #include "net/net.h"
 #include "net/vhost_net.h"
@@ -223,6 +224,11 @@ void runstate_set(RunState new_state)
     current_run_state = new_state;
 }
 
+RunState runstate_get(void)
+{
+    return current_run_state;
+}
+
 bool runstate_is_running(void)
 {
     return runstate_check(RUN_STATE_RUNNING);
@@ -394,7 +400,7 @@ static NotifierList wakeup_notifiers =
 static NotifierList shutdown_notifiers =
     NOTIFIER_LIST_INITIALIZER(shutdown_notifiers);
 static uint32_t wakeup_reason_mask = ~(1 << QEMU_WAKEUP_REASON_NONE);
-static GStrv exec_argv;
+GStrv exec_argv;
 
 ShutdownCause qemu_shutdown_requested_get(void)
 {
@@ -686,11 +692,22 @@ void qemu_system_shutdown_request(ShutdownCause reason)
     qemu_notify_event();
 }
 
-void qemu_system_exec_request(const strList *args)
+void qemu_system_exec_argv_init(const strList *args)
 {
     exec_argv = strv_from_strList(args);
-    shutdown_requested = 1;
-    qemu_notify_event();
+}
+
+void qemu_system_exec_request(void)
+{
+    MigrationState *s = migrate_get_current();
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        if (migration_has_finished(s)) {
+            shutdown_requested = 1;
+            qemu_notify_event();
+        } else {
+            s->parameters.mode = MIG_MODE_NORMAL;
+        }
+    }
 }
 
 static void qemu_system_powerdown(void)
@@ -743,13 +760,42 @@ static bool main_loop_should_exit(void)
     if (request) {
         if (qemu_exec_requested()) {
             Error *err = NULL;
-            cpr_preserve_fds();
-            execvp(exec_argv[0], exec_argv);
-            error_setg_errno(&err, errno, "execvp %s failed", exec_argv[0]);
-            cpr_exec_failed(err);
-            g_strfreev(exec_argv);
-            exec_argv = NULL;
-            return false;
+            int ret;
+            long data = 1;
+            /* tell new qemu vm state file is ready */
+            do {
+                ret = write(eventnotifier_ptoc[1], &data, sizeof(data));
+            } while (ret < 0 && errno == EINTR);
+            if (ret <= 0) {
+                error_report("write ptoc eventnotifier failed");
+                MigrationState *s = migrate_get_current();
+                s->parameters.mode = MIG_MODE_NORMAL;
+                bdrv_invalidate_cache_all(&err);
+                exec_argv = NULL;
+                if (vm_run_state == RUN_STATE_RUNNING) {
+                    vm_start();
+                } else {
+                    runstate_set(vm_run_state);
+                }
+                return false;
+            }
+            do {
+                ret = read(eventnotifier_ctop[0], &data, sizeof(data));
+            } while (ret < 0 && errno == EINTR);
+            if (ret <= 0) {
+                error_report("read ctop eventnotifier failed");
+                MigrationState *s = migrate_get_current();
+                s->parameters.mode = MIG_MODE_NORMAL;
+                bdrv_invalidate_cache_all(&err);
+                exec_argv = NULL;
+                if (vm_run_state == RUN_STATE_RUNNING) {
+                    vm_start();
+                } else {
+                    runstate_set(vm_run_state);
+                }
+                return false;
+            }
+            exit(0);
         }
         qemu_kill_report();
         qemu_system_shutdown(request);

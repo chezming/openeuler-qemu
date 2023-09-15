@@ -54,19 +54,12 @@ void cpr_exec(void)
     MigrationState *s = migrate_get_current();
     Error *err = NULL;
 
-    if (migrate_mode_of(s) == MIG_MODE_CPR_EXEC && !migration_has_failed(s)) {
-        if (!migration_has_finished(s)) {
-            error_setg(&err, "cannot exec: migration status is '%s', "
-                             "but must be 'completed'",
-                       MigrationStatus_str(s->state));
-            goto error;
-        }
-
+    if (migrate_mode_of(s) == MIG_MODE_CPR_EXEC) {
         if (cpr_state_save(&err)) {
             goto error;
         }
 
-        qemu_system_exec_request(s->parameters.cpr_exec_args);
+        qemu_system_exec_argv_init(s->parameters.cpr_exec_args);
     }
     return;
 

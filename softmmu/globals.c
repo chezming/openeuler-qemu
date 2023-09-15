@@ -72,3 +72,6 @@ enum xen_mode xen_mode = XEN_EMULATE;
 bool xen_domid_restrict;
 
 bool cpr_exec_migrating = false;
+int eventnotifier_ptoc[2] = {-1, -1};
+int eventnotifier_ctop[2] = {-1, -1};
+RunState vm_run_state;

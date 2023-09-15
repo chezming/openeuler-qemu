@@ -5,6 +5,7 @@
 #include "qemu/timer.h"
 #include "qemu/notify.h"
 #include "qemu/uuid.h"
+#include "qapi/qapi-types-run-state.h"
 
 /* vl.c */
 
@@ -13,6 +14,10 @@ extern const char *qemu_name;
 extern QemuUUID qemu_uuid;
 extern bool qemu_uuid_set;
 extern bool cpr_exec_migrating;
+extern GStrv exec_argv;
+extern int eventnotifier_ptoc[2];
+extern int eventnotifier_ctop[2];
+extern RunState vm_run_state;
 
 void qemu_add_exit_notifier(Notifier *notify);
 void qemu_remove_exit_notifier(Notifier *notify);

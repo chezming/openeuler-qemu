@@ -35,6 +35,7 @@
 #include "qemu-file.h"
 #include "migration/cpr.h"
 #include "migration/vmstate.h"
+#include "migration/cpr-state.h"
 #include "block/block.h"
 #include "qapi/error.h"
 #include "qapi/clone-visitor.h"
@@ -62,6 +63,7 @@
 #include "qemu/yank.h"
 #include "sysemu/cpus.h"
 #include "yank_functions.h"
+#include "qemu-common.h"
 
 #define MAX_THROTTLE  (128 << 20)      /* Migration transfer speed throttling */
 
@@ -481,6 +483,21 @@ static void qemu_start_incoming_migration(const char *uri, Error **errp)
     } else if (strstart(uri, "fd:", &p)) {
         fd_start_incoming_migration(p, errp);
     } else if (strstart(uri, "file:", &p)) {
+        long data = 1;
+        /* tell parent new qemu is ready */
+        while (write(eventnotifier_ctop[1], &data, sizeof(data)) < 0) {
+            if (errno == EINTR)
+                continue;
+            error_setg(errp, "write eventnotifier_ctop failed");
+            return;
+        }
+        /* wait util vm state file is ready */
+        while (read(eventnotifier_ptoc[0], &data, sizeof(data)) < 0) {
+            if (errno == EINTR)
+                continue;
+            error_setg(errp, "read evnetnotifier_ptoc failed");
+            return;
+        }
         file_start_incoming_migration(p, errp);
     } else {
         error_setg(errp, "unknown migration protocol: %s", uri);
@@ -551,6 +568,12 @@ static void process_incoming_migration_bh(void *opaque)
      */
     migrate_set_state(&mis->state, MIGRATION_STATUS_ACTIVE,
                       MIGRATION_STATUS_COMPLETED);
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        MigrationState *s = migrate_get_current();
+        s->parameters.mode = MIG_MODE_NORMAL;
+        close(eventnotifier_ptoc[0]);
+        close(eventnotifier_ctop[1]);
+    }
     qemu_bh_delete(mis->bh);
     migration_incoming_state_destroy();
 }
@@ -560,6 +583,7 @@ static void process_incoming_migration_co(void *opaque)
     MigrationIncomingState *mis = migration_incoming_get_current();
     PostcopyState ps;
     int ret;
+    long data = 1;
     Error *local_err = NULL;
 
     assert(mis->from_src_file);
@@ -617,6 +641,25 @@ static void process_incoming_migration_co(void *opaque)
         error_report("load of migration failed: %s", strerror(-ret));
         goto fail;
     }
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        /* tell parent migration succeed */
+        do {
+            ret = write(eventnotifier_ctop[1], &data, sizeof(data));
+        } while (ret < 0 && errno == EINTR);
+        if (ret < 0) {
+            error_report("write ctop eventnotifier failed");
+            goto fail;
+        }
+        /* wait util parent exit */
+        do {
+            ret = read(eventnotifier_ptoc[0], &data, sizeof(data));
+        } while (ret < 0 && errno == EINTR);
+        if (ret > 0) {
+            error_report("parent not exit");
+            goto fail;
+        }
+    }
+
     mis->bh = qemu_bh_new(process_incoming_migration_bh, mis);
     qemu_bh_schedule(mis->bh);
     mis->migration_incoming_co = NULL;
@@ -1919,7 +1962,7 @@ static void migrate_fd_cleanup(MigrationState *s)
         }
     }
     block_cleanup_parameters(s);
-    cpr_exec();
+    qemu_system_exec_request();
     yank_unregister_instance(MIGRATION_YANK_INSTANCE);
 }
 
@@ -2552,6 +2595,30 @@ void qmp_migrate(const char *uri, bool has_blk, bool blk,
     } else if (strstart(uri, "fd:", &p)) {
         fd_start_outgoing_migration(s, p, &local_err);
     } else if (strstart(uri, "file:", &p)) {
+        long data = 1;
+        qemu_pipe(eventnotifier_ptoc);
+        qemu_pipe(eventnotifier_ctop);
+        cpr_save_fd("eventnotifier_ptoc_0", 0, eventnotifier_ptoc[0]);
+        cpr_save_fd("eventnotifier_ctop_1", 0, eventnotifier_ctop[1]);
+        cpr_preserve_fds();
+        cpr_exec();
+        vm_run_state = runstate_get();
+        if (fork() > 0) {
+            close(eventnotifier_ptoc[0]);
+            close(eventnotifier_ctop[1]);
+            while (read(eventnotifier_ctop[0], &data, sizeof(data)) < 0) {
+                if (errno == EINTR)
+                    continue;
+                error_setg(errp,"read ctop eventnotifier failed");
+                return;
+            }
+        } else {
+            close(eventnotifier_ptoc[1]);
+            close(eventnotifier_ctop[0]);
+            execvp(exec_argv[0], exec_argv);
+            error_setg(errp,"execvp %s failed", exec_argv[0]);
+            return;
+        }
         file_start_outgoing_migration(s, p, &local_err);
     } else {
         if (!(has_resume && resume)) {
