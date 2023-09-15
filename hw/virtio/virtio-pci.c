@@ -23,6 +23,8 @@
 #include "hw/boards.h"
 #include "hw/virtio/virtio.h"
 #include "migration/qemu-file-types.h"
+#include "migration/cpr-state.h"
+#include "migration/misc.h"
 #include "hw/pci/pci.h"
 #include "hw/pci/pci_bus.h"
 #include "hw/qdev-properties.h"
@@ -39,6 +41,7 @@
 #include "hw/virtio/virtio-bus.h"
 #include "qapi/visitor.h"
 #include "sysemu/replay.h"
+#include "sysemu/runstate.h"
 
 #define VIRTIO_PCI_REGION_SIZE(dev)     VIRTIO_PCI_CONFIG_OFF(msix_present(dev))
 
@@ -1033,6 +1036,16 @@ static void virtio_pci_vector_poll(PCIDevice *dev,
     }
 }
 
+static void event_notifier_set_prestart_handler(void *opaque)
+{
+    VirtQueue *vq = opaque;
+    EventNotifier *notifier = virtio_queue_get_guest_notifier(vq);
+
+    event_notifier_set(notifier);
+
+    return;
+}
+
 static int virtio_pci_set_guest_notifier(DeviceState *d, int n, bool assign,
                                          bool with_irqfd)
 {
@@ -1041,17 +1054,53 @@ static int virtio_pci_set_guest_notifier(DeviceState *d, int n, bool assign,
     VirtioDeviceClass *vdc = VIRTIO_DEVICE_GET_CLASS(vdev);
     VirtQueue *vq = virtio_get_queue(vdev, n);
     EventNotifier *notifier = virtio_queue_get_guest_notifier(vq);
+    int r, fdr, fdw;
+    char *namer, *namew;
 
+    namew = g_strdup_printf("%s_VirtQueue_guest_notifier_%d_w",
+                            d->id ? d->id : d->canonical_path, n);
+    namer = g_strdup_printf("%s_VirtQueue_guest_notifier_%d_r",
+                            d->id ? d->id : d->canonical_path, n);
     if (assign) {
-        int r = event_notifier_init(notifier, 0);
-        if (r < 0) {
-            return r;
+        if (vdev->vhost_user_dev) {
+            fdr = cpr_find_fd(namer, 0);
+            fdw = cpr_find_fd(namew, 0);
+            if (fdr < 0  || fdw < 0) {
+                r = event_notifier_init(notifier, 0);
+                if (r < 0) {
+                    g_free(namer);
+                    g_free(namew);
+                    return r;
+                } else {
+                    cpr_resave_fd(namer, 0, notifier->rfd);
+                    cpr_resave_fd(namew, 0, notifier->wfd);
+                }
+            } else {
+                notifier->rfd = fdr;
+                notifier->wfd = fdw;
+                notifier->initialized = true;
+                qemu_add_cpr_exec_complete_handler(event_notifier_set_prestart_handler,
+                                                   (void *)vq);
+            }
+        } else {
+            r = event_notifier_init(notifier, 0);
+            if (r < 0) {
+                g_free(namer);
+                g_free(namew);
+                return r;
+            }
         }
         virtio_queue_set_guest_notifier_fd_handler(vq, true, with_irqfd);
     } else {
         virtio_queue_set_guest_notifier_fd_handler(vq, false, with_irqfd);
-        event_notifier_cleanup(notifier);
+        if (!vdev->vhost_user_dev || migrate_mode() != MIG_MODE_CPR_EXEC) {
+            event_notifier_cleanup(notifier);
+            cpr_delete_fd(namer, 0);
+            cpr_delete_fd(namew, 0);
+        }
     }
+    g_free(namer);
+    g_free(namew);
 
     if (!msix_enabled(&proxy->pci_dev) &&
         vdev->use_guest_notifier_mask &&

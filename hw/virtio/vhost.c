@@ -23,13 +23,16 @@
 #include "standard-headers/linux/vhost_types.h"
 #include "hw/virtio/virtio-bus.h"
 #include "hw/virtio/virtio-access.h"
+#include "hw/virtio/vhost-user.h"
 #include "migration/misc.h"
 #include "migration/blocker.h"
 #include "migration/qemu-file-types.h"
 #include "migration/migration.h"
+#include "migration/cpr-state.h"
 #include "sysemu/dma.h"
 #include "sysemu/tcg.h"
 #include "trace.h"
+#include "chardev/char-fe.h"
 
 /* enabled until disconnected backend stabilizes */
 #define _VHOST_DEBUG 1
@@ -1307,13 +1310,43 @@ static int vhost_virtqueue_set_busyloop_timeout(struct vhost_dev *dev,
 static int vhost_virtqueue_init(struct vhost_dev *dev,
                                 struct vhost_virtqueue *vq, int n)
 {
+    int r, fdr, fdw;
+    char *namer, *namew;
     int vhost_vq_index = dev->vhost_ops->vhost_get_vq_index(dev, n);
     struct vhost_vring_file file = {
         .index = vhost_vq_index,
     };
-    int r = event_notifier_init(&vq->masked_notifier, 0);
-    if (r < 0) {
-        return r;
+    if (dev->vhost_ops->backend_type == VHOST_BACKEND_TYPE_USER) {
+        char *name = vhost_user_get_dev_name(dev->opaque);
+
+        namew = g_strdup_printf("%s_vhost_virtqueue_masked_notifier_%ld_w",
+                                name, vq - dev->vqs);
+        namer = g_strdup_printf("%s_vhost_virtqueue_masked_notifier_%ld_r",
+                                name, vq - dev->vqs);
+        fdr = cpr_find_fd(namer, 0);
+        fdw = cpr_find_fd(namew, 0);
+        if (fdr < 0 || fdw < 0) {
+            r = event_notifier_init(&vq->masked_notifier, 0);
+            if (r < 0) {
+                g_free(namer);
+                g_free(namew);
+                return r;
+            } else {
+                cpr_resave_fd(namer, 0, event_notifier_get_fd(&vq->masked_notifier));
+                cpr_resave_fd(namew, 0, event_notifier_get_wfd(&vq->masked_notifier));
+            }
+        } else {
+            vq->masked_notifier.rfd = fdr;
+            vq->masked_notifier.wfd = fdw;
+            vq->masked_notifier.initialized = true;
+        }
+        g_free(namer);
+        g_free(namew);
+    } else {
+        r = event_notifier_init(&vq->masked_notifier, 0);
+        if (r < 0) {
+            return r;
+        }
     }
 
     file.fd = event_notifier_get_fd(&vq->masked_notifier);
@@ -1351,37 +1384,6 @@ static bool vhost_dev_used_memslots_is_exceeded(struct vhost_dev *hdev)
     return false;
 }
 
-static void vhost_cpr_exec_notifier(Notifier *notifier, void *data)
-{
-    MigrationState *s = data;
-    struct vhost_dev *dev;
-    int r = 0;
-
-    if (migrate_mode_of(s) == MIG_MODE_CPR_EXEC) {
-        dev = container_of(notifier, struct vhost_dev, cpr_notifier);
-        if (migration_has_failed(s)) {
-            r = dev->vhost_ops->vhost_set_owner(dev);
-        } else {
-            /*
-             * Do not reset vhost device when status MIGRATION_STATUS_SETUP,
-             * because slave_read will read vring last_avail_idx etc information,
-             * if reset here, slave_read will read fail.
-             *
-             * Normally reset operation when migration succeed, and the connection
-             * to vhost bankend will be reestablished later.
-             */
-            if (s->state == MIGRATION_STATUS_SETUP) {
-                VHOST_OPS_DEBUG("migration setup phase should not reset device");
-                return;
-            }
-            r = dev->vhost_ops->vhost_reset_device(dev);
-        }
-        if (r < 0) {
-            VHOST_OPS_DEBUG("vhost_reset_device failed");
-        }
-    }
-}
-
 int vhost_dev_init(struct vhost_dev *hdev, void *opaque,
                    VhostBackendType backend_type, uint32_t busyloop_timeout,
                    Error **errp)
@@ -1391,7 +1393,6 @@ int vhost_dev_init(struct vhost_dev *hdev, void *opaque,
 
     hdev->vdev = NULL;
     hdev->migration_blocker = NULL;
-    hdev->cpr_notifier.notify = NULL;
 
     r = vhost_set_backend_type(hdev, backend_type);
     assert(r >= 0);
@@ -1483,7 +1484,6 @@ int vhost_dev_init(struct vhost_dev *hdev, void *opaque,
     hdev->log_enabled = false;
     hdev->started = false;
     memory_listener_register(&hdev->memory_listener, &address_space_memory);
-    migration_add_notifier(&hdev->cpr_notifier, vhost_cpr_exec_notifier);
     QLIST_INSERT_HEAD(&vhost_devices, hdev, entry);
 
     /*
@@ -1524,7 +1524,6 @@ void vhost_dev_cleanup(struct vhost_dev *hdev)
         QLIST_REMOVE(hdev, entry);
     }
     migrate_del_blocker(&hdev->migration_blocker);
-    migration_remove_notifier(&hdev->cpr_notifier);
     g_free(hdev->mem);
     g_free(hdev->mem_sections);
     if (hdev->vhost_ops) {
@@ -1694,10 +1693,28 @@ void vhost_dev_set_config_notifier(struct vhost_dev *hdev,
     hdev->config_ops = ops;
 }
 
-void vhost_dev_free_inflight(struct vhost_inflight *inflight)
+void vhost_dev_free_inflight(struct vhost_inflight *inflight,
+                             struct vhost_dev *dev)
 {
+    char *name_f, *name_s, *name_o;
     if (inflight && inflight->addr) {
-        qemu_memfd_free(inflight->addr, inflight->size, inflight->fd);
+        if (dev && migrate_mode() != MIG_MODE_CPR_EXEC) {
+            qemu_memfd_free(inflight->addr, inflight->size, inflight->fd);
+            CharBackend *chr = vhost_user_get_charbackend(dev);
+            name_f = g_strdup_printf("%s-inflight", chr->chr->label);
+            name_s = g_strdup_printf("%s-inflight-size", chr->chr->label);
+            name_o = g_strdup_printf("%s-inflight-offset", chr->chr->label);
+            cpr_delete_fd(name_f, 0);
+            cpr_delete_fd(name_s, SPECIAL_ID);
+            cpr_delete_fd(name_o, SPECIAL_ID);
+            g_free(name_f);
+            g_free(name_s);
+            g_free(name_o);
+        } else if (dev && migrate_mode() == MIG_MODE_CPR_EXEC) {
+            qemu_memfd_free(inflight->addr, inflight->size, -1);
+        } else {
+            qemu_memfd_free(inflight->addr, inflight->size, inflight->fd);
+        }
         inflight->addr = NULL;
         inflight->fd = -1;
     }
@@ -1717,7 +1734,7 @@ static int vhost_dev_resize_inflight(struct vhost_inflight *inflight,
         return -1;
     }
 
-    vhost_dev_free_inflight(inflight);
+    vhost_dev_free_inflight(inflight, NULL);
     inflight->offset = 0;
     inflight->addr = addr;
     inflight->fd = fd;

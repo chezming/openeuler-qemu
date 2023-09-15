@@ -94,7 +94,6 @@ struct vhost_dev {
     QLIST_ENTRY(vhost_dev) entry;
     QLIST_HEAD(, vhost_iommu) iommu_list;
     IOMMUNotifier n;
-    Notifier cpr_notifier;
     const VhostDevConfigOps *config_ops;
 };
 
@@ -147,7 +146,7 @@ void vhost_dev_set_config_notifier(struct vhost_dev *dev,
                                    const VhostDevConfigOps *ops);
 
 void vhost_dev_reset_inflight(struct vhost_inflight *inflight);
-void vhost_dev_free_inflight(struct vhost_inflight *inflight);
+void vhost_dev_free_inflight(struct vhost_inflight *inflight, struct vhost_dev *dev);
 void vhost_dev_save_inflight(struct vhost_inflight *inflight, QEMUFile *f);
 int vhost_dev_load_inflight(struct vhost_inflight *inflight, QEMUFile *f);
 int vhost_dev_prepare_inflight(struct vhost_dev *hdev, VirtIODevice *vdev);

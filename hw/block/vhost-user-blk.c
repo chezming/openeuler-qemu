@@ -318,8 +318,9 @@ static void vhost_user_blk_handle_output(VirtIODevice *vdev, VirtQueue *vq)
 static void vhost_user_blk_reset(VirtIODevice *vdev)
 {
     VHostUserBlk *s = VHOST_USER_BLK(vdev);
+    struct vhost_dev *dev = &s->dev;
 
-    vhost_dev_free_inflight(s->inflight);
+    vhost_dev_free_inflight(s->inflight, dev);
 }
 
 static int vhost_user_blk_connect(DeviceState *dev, Error **errp)
@@ -526,6 +527,7 @@ static void vhost_user_blk_device_realize(DeviceState *dev, Error **errp)
     qemu_chr_fe_set_handlers(&s->chardev,  NULL, NULL,
                              vhost_user_blk_event, NULL, (void *)dev,
                              NULL, true);
+    vdev->vhost_user_dev = true;
     return;
 
 virtio_err:
@@ -545,13 +547,14 @@ static void vhost_user_blk_device_unrealize(DeviceState *dev)
 {
     VirtIODevice *vdev = VIRTIO_DEVICE(dev);
     VHostUserBlk *s = VHOST_USER_BLK(dev);
+    struct vhost_dev *vhdev = &s->dev;
     int i;
 
     virtio_set_status(vdev, 0);
     qemu_chr_fe_set_handlers(&s->chardev,  NULL, NULL, NULL,
                              NULL, NULL, NULL, false);
     vhost_dev_cleanup(&s->dev);
-    vhost_dev_free_inflight(s->inflight);
+    vhost_dev_free_inflight(s->inflight, vhdev);
     g_free(s->vhost_vqs);
     s->vhost_vqs = NULL;
     g_free(s->inflight);

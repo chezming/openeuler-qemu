@@ -32,6 +32,8 @@
 #include "qapi/qobject-output-visitor.h"
 #include "qemu/cutils.h"
 #include "trace.h"
+#include "migration/cpr-state.h"
+#include "migration/misc.h"
 
 #ifndef AI_ADDRCONFIG
 # define AI_ADDRCONFIG 0
@@ -913,6 +915,9 @@ static int unix_listen_saddr(UnixSocketAddress *saddr,
     size_t pathlen;
     size_t addrlen;
 
+    fd = cpr_find_fd(saddr->path, 0);
+    if (fd >= 0)
+        return fd;
     sock = qemu_socket(PF_UNIX, SOCK_STREAM, 0);
     if (sock < 0) {
         error_setg_errno(errp, errno, "Failed to create Unix socket");
@@ -984,6 +989,7 @@ static int unix_listen_saddr(UnixSocketAddress *saddr,
     }
 
     g_free(pathbuf);
+    cpr_resave_fd(saddr->path, 0, sock);
     return sock;
 
 err:
@@ -999,10 +1005,16 @@ static int unix_connect_saddr(UnixSocketAddress *saddr, Error **errp)
     int sock, rc;
     size_t pathlen;
     size_t addrlen;
+    char *name;
 
     if (saddr->path == NULL) {
         error_setg(errp, "unix connect: no path specified");
         return -1;
+    }
+
+    sock = cpr_find_fd(saddr->path, 0);
+    if (migrate_mode() == MIG_MODE_CPR_EXEC && sock >= 0) {
+        return sock;
     }
 
     sock = qemu_socket(PF_UNIX, SOCK_STREAM, 0);
@@ -1047,6 +1059,10 @@ static int unix_connect_saddr(UnixSocketAddress *saddr, Error **errp)
                          saddr->path);
         goto err;
     }
+
+    name = g_strdup_printf("%s", saddr->path);
+    cpr_save_fd(name, 0, sock);
+    g_free(name);
 
     return sock;
 

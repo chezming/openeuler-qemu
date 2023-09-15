@@ -125,6 +125,7 @@ static void vhost_user_scsi_event(void *opaque, QEMUChrEvent event)
 
 static void vhost_user_scsi_realize(DeviceState *dev, Error **errp)
 {
+    VirtIODevice *vdev = VIRTIO_DEVICE(dev);
     VirtIOSCSICommon *vs = VIRTIO_SCSI_COMMON(dev);
     VHostUserSCSI *s = VHOST_USER_SCSI(dev);
     VHostSCSICommon *vsc = VHOST_SCSI_COMMON(s);
@@ -168,6 +169,7 @@ static void vhost_user_scsi_realize(DeviceState *dev, Error **errp)
     vsc->target = vs->conf.boot_tpgt;
 
     chr = qemu_chr_fe_get_driver(&vs->conf.chardev);
+    vdev->vhost_user_dev = true;
     qemu_chr_set_reconnect_time(chr, VHOST_USER_SCSI_RECONNECT_TIME);
     qemu_chr_fe_set_handlers(&vs->conf.chardev, NULL, NULL,
                              vhost_user_scsi_event, NULL, s, NULL, true);

@@ -769,7 +769,6 @@ static bool main_loop_should_exit(void)
             if (ret <= 0) {
                 error_report("write ptoc eventnotifier failed");
                 MigrationState *s = migrate_get_current();
-                s->parameters.mode = MIG_MODE_NORMAL;
                 bdrv_invalidate_cache_all(&err);
                 exec_argv = NULL;
                 if (vm_run_state == RUN_STATE_RUNNING) {
@@ -777,6 +776,7 @@ static bool main_loop_should_exit(void)
                 } else {
                     runstate_set(vm_run_state);
                 }
+                s->parameters.mode = MIG_MODE_NORMAL;
                 return false;
             }
             do {
@@ -785,7 +785,6 @@ static bool main_loop_should_exit(void)
             if (ret <= 0) {
                 error_report("read ctop eventnotifier failed");
                 MigrationState *s = migrate_get_current();
-                s->parameters.mode = MIG_MODE_NORMAL;
                 bdrv_invalidate_cache_all(&err);
                 exec_argv = NULL;
                 if (vm_run_state == RUN_STATE_RUNNING) {
@@ -793,6 +792,7 @@ static bool main_loop_should_exit(void)
                 } else {
                     runstate_set(vm_run_state);
                 }
+                s->parameters.mode = MIG_MODE_NORMAL;
                 return false;
             }
             exit(0);

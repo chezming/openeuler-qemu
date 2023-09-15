@@ -29,6 +29,8 @@
 #include "hw/virtio/virtio-bus.h"
 #include "hw/virtio/virtio.h"
 #include "exec/address-spaces.h"
+#include "migration/cpr-state.h"
+#include "migration/misc.h"
 
 /* #define DEBUG_VIRTIO_BUS */
 
@@ -271,18 +273,44 @@ int virtio_bus_set_host_notifier(VirtioBusState *bus, int n, bool assign)
     DeviceState *proxy = DEVICE(BUS(bus)->parent);
     VirtQueue *vq = virtio_get_queue(vdev, n);
     EventNotifier *notifier = virtio_queue_get_host_notifier(vq);
-    int r = 0;
+    int r = 0, fdr, fdw;
+    char *namer = NULL, *namew = NULL;
 
     if (!k->ioeventfd_assign) {
         return -ENOSYS;
     }
 
     if (assign) {
-        r = event_notifier_init(notifier, 1);
-        if (r < 0) {
-            error_report("%s: unable to init event notifier: %s (%d)",
-                         __func__, strerror(-r), r);
-            return r;
+        if (vdev->vhost_user_dev) {
+            namew = g_strdup_printf("%s_VirtQueue_host_notifier_%d_w",
+                    proxy->id ? proxy->id : proxy->canonical_path, n);
+            namer = g_strdup_printf("%s_VirtQueue_host_notifier_%d_r",
+                    proxy->id ? proxy->id : proxy->canonical_path, n);
+            fdr = cpr_find_fd(namer, 0);
+            fdw = cpr_find_fd(namew, 0);
+            if (fdr < 0 || fdw < 0) {
+                r = event_notifier_init(notifier, 1);
+                if (r < 0) {
+                    error_report("%s: unable to init event notifier: %s (%d)",
+                                 __func__, strerror(-r), r);
+                    goto out;
+                } else {
+                    cpr_resave_fd(namer, 0, event_notifier_get_fd(notifier));
+                    cpr_resave_fd(namew, 0, event_notifier_get_wfd(notifier));
+                }
+            } else {
+                notifier->rfd = fdr;
+                notifier->wfd = fdw;
+                notifier->initialized = true;
+            }
+        } else {
+            r = event_notifier_init(notifier, 1);
+            if (r < 0) {
+                error_report("unable to init event notifier: %s (%d)",
+                              strerror(-r), r);
+                goto out;
+                return r;
+            }
         }
         r = k->ioeventfd_assign(proxy, notifier, n, true);
         if (r < 0) {
@@ -297,6 +325,12 @@ int virtio_bus_set_host_notifier(VirtioBusState *bus, int n, bool assign)
         virtio_queue_set_host_notifier_enabled(vq, assign);
     }
 
+out:
+    if (namer)  {
+        g_free(namer);
+        g_free(namew);
+    }
+
     return r;
 }
 
@@ -304,13 +338,26 @@ void virtio_bus_cleanup_host_notifier(VirtioBusState *bus, int n)
 {
     VirtIODevice *vdev = virtio_bus_get_device(bus);
     VirtQueue *vq = virtio_get_queue(vdev, n);
+    DeviceState *proxy = DEVICE(BUS(bus)->parent);
     EventNotifier *notifier = virtio_queue_get_host_notifier(vq);
+    char *namer = NULL, *namew = NULL;
 
     /* Test and clear notifier after disabling event,
      * in case poll callback didn't have time to run.
      */
     virtio_queue_host_notifier_read(notifier);
+    if (vdev->vhost_user_dev && migrate_mode() == MIG_MODE_CPR_EXEC) {
+        return;
+    }
     event_notifier_cleanup(notifier);
+    namew = g_strdup_printf("%s_VirtQueue_host_notifier_%d_w",
+                            proxy->id ? proxy->id : proxy->canonical_path, n);
+    namer = g_strdup_printf("%s_VirtQueue_host_notifier_%d_r",
+                            proxy->id ? proxy->id : proxy->canonical_path, n);
+    cpr_delete_fd(namer, 0);
+    cpr_delete_fd(namew, 0);
+    g_free(namer);
+    g_free(namew);
 }
 
 static char *virtio_bus_get_dev_path(DeviceState *dev)

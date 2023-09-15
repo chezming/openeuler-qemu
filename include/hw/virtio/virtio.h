@@ -103,6 +103,7 @@ struct VirtIODevice
     bool started;
     bool start_on_kick; /* when virtio 1.0 feature has not been negotiated */
     bool disable_legacy_check;
+    bool vhost_user_dev; /* True when virtiodevice is vhost user device, for cpr exec */
     VMChangeStateEntry *vmstate;
     char *bus_name;
     uint8_t device_endian;
