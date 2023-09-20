@@ -759,6 +759,12 @@ for opt do
   ;;
   --gdb=*) gdb_bin="$optarg"
   ;;
+  # everything else has the same name in configure and meson
+  --*) meson_option_parse "$opt" "$optarg"
+  ;;
+  # Pass through -Dxxxx options to meson
+  -D*) meson_options="$meson_options $opt"
+  ;;
   --disable-vt-iommu) vt_iommu="no"
   ;;
   --enable-vt-iommu) vt_iommu="yes"
@@ -767,11 +773,9 @@ for opt do
   ;;
   --enable-vhost-net) vhost_net="yes"
   ;;
-  # everything else has the same name in configure and meson
-  --*) meson_option_parse "$opt" "$optarg"
+  --disable-vt-memhp) vt_memhp="no"
   ;;
-  # Pass through -Dxxxx options to meson
-  -D*) meson_options="$meson_options $opt"
+  --enable-vt-memhp) vt_memhp="yes"
   ;;
   esac
 done
@@ -897,7 +901,7 @@ cat << EOF
   linux-user      all linux usermode emulation targets
   bsd-user        all BSD usermode emulation targets
   pie             Position Independent Executables
-  vt-iommu        vt-iommu device support
+
 NOTE: The object files are built at the place where configure is launched
 EOF
 exit 0

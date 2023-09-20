@@ -167,6 +167,62 @@ static void core4_cpus_init(MachineState *ms)
     }
 }
 
+void sw64_pm_set_irq(void *opaque, int irq, int level)
+{
+    if (kvm_enabled()) {
+        if (level == 0)
+            return;
+        kvm_set_irq(kvm_state, irq, level);
+        return;
+    }
+}
+
+static inline DeviceState *create_sw64_pm(CORE4MachineState *c4ms)
+{
+    DeviceState *dev;
+
+    dev = qdev_try_new(TYPE_SW64_PM);
+
+    if (!dev) {
+        printf("failed to create sw64_pm,Unknown device TYPE_SW64_PM");
+    }
+    return dev;
+}
+
+static void sw64_create_device_memory(MachineState *machine, BoardState *bs)
+{
+    ram_addr_t ram_size = machine->ram_size;
+    ram_addr_t device_mem_size;
+
+    /* always allocate the device memory information */
+    machine->device_memory = g_malloc0(sizeof(*machine->device_memory));
+
+    /* initialize device memory address space */
+    if (machine->ram_size < machine->maxram_size) {
+        device_mem_size = machine->maxram_size - machine->ram_size;
+
+        if (machine->ram_slots > ACPI_MAX_RAM_SLOTS) {
+            printf("unsupported amount of memory slots: %"PRIu64,
+                         machine->ram_slots);
+            exit(EXIT_FAILURE);
+        }
+
+        if (QEMU_ALIGN_UP(machine->maxram_size,
+                          TARGET_PAGE_SIZE) != machine->maxram_size) {
+            printf("maximum memory size must by aligned to multiple of "
+                         "%d bytes", TARGET_PAGE_SIZE);
+            exit(EXIT_FAILURE);
+        }
+
+        machine->device_memory->base = ram_size;
+
+        memory_region_init(&machine->device_memory->mr, OBJECT(bs),
+                           "device-memory", device_mem_size);
+        memory_region_add_subregion(get_system_memory(), machine->device_memory->base,
+                                    &machine->device_memory->mr);
+    }
+}
+
 void core4_board_init(MachineState *ms)
 {
     CORE4MachineState *core4ms = CORE4_MACHINE(ms);
@@ -185,6 +241,8 @@ void core4_board_init(MachineState *ms)
     }
     else
         sw64_create_alarm_timer(ms, bs);
+
+    sw64_create_device_memory(ms, bs);
 
     memory_region_add_subregion(get_system_memory(), 0, ms->ram);
 
@@ -224,6 +282,7 @@ void core4_board_init(MachineState *ms)
 
     sw64_create_pcie(bs, b, phb);
 
+    core4ms->acpi_dev = create_sw64_pm(core4ms);
     core4ms->fw_cfg = sw64_create_fw_cfg(SW_FW_CFG_P_BASE);
     rom_set_fw(core4ms->fw_cfg);
 

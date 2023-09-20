@@ -22,6 +22,8 @@
 #include "hw/sw64/sunway.h"
 #include "hw/boards.h"
 #include "sysemu/numa.h"
+#include "hw/mem/pc-dimm.h"
+#include "qapi/error.h"
 
 #define MAX_CPUS_CORE4 64
 #define C4_UEFI_BIOS_NAME "c4-uefi-bios-sw"
@@ -71,9 +73,89 @@ static void core4_init(MachineState *machine)
     }
 }
 
+static HotplugHandler *sw64_get_hotplug_handler(MachineState *machine,
+                                             DeviceState *dev)
+{
+    if (object_dynamic_cast(OBJECT(dev), TYPE_PC_DIMM))
+        return HOTPLUG_HANDLER(machine);
+
+    return NULL;
+}
+
+static void core4_machine_device_pre_plug_cb(HotplugHandler *hotplug_dev,
+                                      DeviceState *dev, Error **errp)
+{
+    MachineState *ms = MACHINE(hotplug_dev);
+    Error *local_err = NULL;
+
+    if (object_dynamic_cast(OBJECT(dev), TYPE_PC_DIMM))
+        pc_dimm_pre_plug(PC_DIMM(dev), ms, NULL, &local_err);
+    else
+	error_setg(errp, "memory hotplug is not enabled");
+
+    return;
+}
+
+static void core4_machine_device_plug_cb(HotplugHandler *hotplug_dev,
+                                      DeviceState *dev, Error **errp)
+{
+    MachineState *ms = MACHINE(hotplug_dev);
+    CORE4MachineState *core4ms = CORE4_MACHINE(hotplug_dev);
+    Error *local_err = NULL;
+
+    if (object_dynamic_cast(OBJECT(dev), TYPE_PC_DIMM))
+        pc_dimm_plug(PC_DIMM(dev), ms);
+
+    hotplug_handler_plug(HOTPLUG_HANDLER(core4ms->acpi_dev),
+                          dev, &local_err);
+}
+
+static void core4_machine_device_unplug_request_cb(HotplugHandler *hotplug_dev,
+                                          DeviceState *dev, Error **errp)
+{
+    CORE4MachineState *core4ms = CORE4_MACHINE(hotplug_dev);
+    Error *local_err = NULL;
+
+    if (object_dynamic_cast(OBJECT(dev), TYPE_PC_DIMM)) {
+        hotplug_handler_unplug_request(HOTPLUG_HANDLER(core4ms->acpi_dev),
+                          dev, &local_err);
+    } else {
+        error_setg(&local_err, "device unplug request for unsupported device"
+                   " type: %s", object_get_typename(OBJECT(dev)));
+    }
+}
+
+static void core4_machine_device_unplug_cb(HotplugHandler *hotplug_dev,
+                                          DeviceState *dev, Error **errp)
+{
+    MachineState *ms = MACHINE(hotplug_dev);
+    CORE4MachineState *core4ms = CORE4_MACHINE(hotplug_dev);
+    Error *local_err = NULL;
+
+    if (object_dynamic_cast(OBJECT(dev), TYPE_PC_DIMM)) {
+        hotplug_handler_unplug(HOTPLUG_HANDLER(core4ms->acpi_dev),
+                          dev, &local_err);
+    } else {
+        error_setg(&local_err, "device unplug for unsupported device"
+                  " type: %s", object_get_typename(OBJECT(dev)));
+    }
+
+    if (local_err) {
+        goto out;
+    }
+
+    pc_dimm_unplug(PC_DIMM(dev), MACHINE(ms));
+    object_unparent(OBJECT(dev));
+
+out:
+    return;
+}
+
 static void core4_machine_class_init(ObjectClass *oc, void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
+    HotplugHandlerClass *hc = HOTPLUG_HANDLER_CLASS(oc);
+
     mc->desc = "CORE4 BOARD";
     mc->init = core4_init;
     mc->block_default_type = IF_IDE;
@@ -82,17 +164,28 @@ static void core4_machine_class_init(ObjectClass *oc, void *data)
     mc->possible_cpu_arch_ids = sw64_possible_cpu_arch_ids;
     mc->default_cpu_type = SW64_CPU_TYPE_NAME("core4");
     mc->default_ram_id = "ram";
+    mc->get_hotplug_handler = sw64_get_hotplug_handler;
+    hc->pre_plug = core4_machine_device_pre_plug_cb;
+    hc->plug = core4_machine_device_plug_cb;
+    hc->unplug_request = core4_machine_device_unplug_request_cb;
+    hc->unplug = core4_machine_device_unplug_cb;
 }
 
 static const TypeInfo core4_machine_info = {
-    .name          = TYPE_CORE4_MACHINE,
-    .parent        = TYPE_MACHINE,
-    .class_init    = core4_machine_class_init,
+    .name = TYPE_CORE4_MACHINE,
+    .parent = TYPE_MACHINE,
     .instance_size = sizeof(CORE4MachineState),
+    .class_size = sizeof(CORE4MachineClass),
+    .class_init = core4_machine_class_init,
+    .interfaces = (InterfaceInfo[]) {
+         { TYPE_HOTPLUG_HANDLER },
+         { }
+    },
 };
 
 static void core4_machine_init(void)
 {
     type_register_static(&core4_machine_info);
 }
-type_init(core4_machine_init);
+
+type_init(core4_machine_init)
