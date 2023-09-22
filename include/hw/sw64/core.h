@@ -1,6 +1,70 @@
 #ifndef HW_SW64_CORE_H
 #define HW_SW64_CORE_H
 
+#include "hw/pci/pci_host.h"
+#include "qom/object.h"
+#include "hw/boards.h"
+#define TYPE_CORE3_BOARD "core3-board"
+#define CORE3_BOARD(obj) \
+    OBJECT_CHECK(BoardState, (obj), TYPE_CORE3_BOARD)
+
+#define TYPE_CORE4_BOARD "core4-board"
+#define CORE4_BOARD(obj) \
+    OBJECT_CHECK(BoardState, (obj), TYPE_CORE4_BOARD)
+
+struct CORE3MachineClass {
+    MachineClass parent;
+};
+
+struct CORE3MachineState {
+    MachineState parent;
+    FWCfgState *fw_cfg;
+    DeviceState *acpi_dev;
+    PCIBus *bus;
+    char *oem_id;
+    char *oem_table_id;
+};
+
+#define TYPE_CORE3_MACHINE   MACHINE_TYPE_NAME("core3")
+OBJECT_DECLARE_TYPE(CORE3MachineState, CORE3MachineClass, CORE3_MACHINE)
+
+struct CORE4MachineClass {
+    MachineClass parent;
+};
+
+struct CORE4MachineState {
+    MachineState parent;
+    FWCfgState *fw_cfg;
+    DeviceState *acpi_dev;
+    PCIBus *bus;
+    char *oem_id;
+    char *oem_table_id;
+};
+
+#define TYPE_CORE4_MACHINE   MACHINE_TYPE_NAME("core4")
+OBJECT_DECLARE_TYPE(CORE4MachineState, CORE4MachineClass, CORE4_MACHINE)
+
+typedef struct BoardState {
+    PCIHostState parent_obj;
+    MemoryRegion io_mcu;
+    MemoryRegion io_intpu;
+    MemoryRegion msi_ep;
+    MemoryRegion mem_ep;
+    MemoryRegion mem_ep64;
+    MemoryRegion conf_piu0;
+    MemoryRegion io_piu0;
+    MemoryRegion io_ep;
+    MemoryRegion io_rtc;
+    qemu_irq serial_irq;
+} BoardState;
+
+#ifndef CONFIG_KVM
+typedef struct TimerState {
+    void *opaque;
+    int order;
+} TimerState;
+#endif
+
 typedef struct boot_params {
         unsigned long initrd_start;                     /* logical address of initrd */
         unsigned long initrd_size;                      /* size of initrd */
@@ -13,16 +77,6 @@ typedef struct boot_params {
         unsigned long cmdline;                          /* logical address of cmdline */
 } BOOT_PARAMS;
 
-void core3_board_init(SW64CPU *cpus[4], MemoryRegion *ram);
-void core4_board_init(SW64CPU *cpus[4], MemoryRegion *ram);
-extern unsigned long core3_init_pc;
-extern unsigned long core4_init_pc;
-#endif
-
-#define MAX_CPUS 64
-
-#ifdef CONFIG_KVM
-#define MAX_CPUS_CORE3 64
-#else
-#define MAX_CPUS_CORE3 32
+void core3_board_init(MachineState *machine);
+void core4_board_init(MachineState *machine);
 #endif

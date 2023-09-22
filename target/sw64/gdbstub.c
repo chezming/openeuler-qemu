@@ -21,7 +21,7 @@
 #include "cpu.h"
 #include "exec/gdbstub.h"
 
-int sw64_cpu_gdb_read_register(CPUState *cs, uint8_t *mem_buf, int n)
+int sw64_cpu_gdb_read_register(CPUState *cs, GByteArray *mem_buf, int n)
 {
     SW64CPU *cpu = SW64_CPU(cs);
     CPUSW64State *env = &cpu->env;

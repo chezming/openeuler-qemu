@@ -26,6 +26,9 @@
 #include "hw/sw64/core.h"
 #include "qemu/log.h"
 
+unsigned long core3_init_pc = 0xfff0000000011100;
+unsigned long core4_init_pc = 0xfff0000000011002;
+
 const KVMCapabilityInfo kvm_arch_required_capabilities[] = {
     KVM_CAP_LAST_INFO
 };
@@ -37,10 +40,11 @@ int kvm_sw64_vcpu_init(CPUState *cs)
     CPUSW64State *env = cs->env_ptr;
     regs = (struct kvm_regs *)cpu->k_regs;
     if (test_feature(env, SW64_FEATURE_CORE3))
-        regs->pc = core3_init_pc;
+        regs->c3_regs.pc = core3_init_pc;
     else if (test_feature(env, SW64_FEATURE_CORE4))
-	regs->pc = core4_init_pc;
-    return kvm_vcpu_ioctl(cs, KVM_SET_REGS, &regs);
+        regs->c4_regs.pc = core4_init_pc;
+
+    return kvm_vcpu_ioctl(cs, KVM_SET_REGS, regs);
 }
 
 static void kvm_sw64_host_cpu_class_init(ObjectClass *oc, void *data)
@@ -72,17 +76,17 @@ int kvm_arch_init(MachineState *ms, KVMState *s)
 /* 50000 jump to bootlader while 2f00000 jump to bios*/
 void kvm_sw64_reset_vcpu(SW64CPU *cpu)
 {
+    struct kvm_regs *regs;
     CPUState *cs = CPU(cpu);
     CPUSW64State *env = cs->env_ptr;
-    struct kvm_regs *regs;
     int ret;
-
     regs = (struct kvm_regs *)cpu->k_regs;
     if (test_feature(env, SW64_FEATURE_CORE3))
-        regs->pc = core3_init_pc;
+        regs->c3_regs.pc = core3_init_pc;
     else if (test_feature(env, SW64_FEATURE_CORE4))
-        regs->pc = core4_init_pc;
-    ret = kvm_vcpu_ioctl(cs, KVM_SET_REGS, &regs);
+        regs->c4_regs.pc = core4_init_pc;
+
+    ret = kvm_vcpu_ioctl(cs, KVM_SET_REGS, regs);
     if (ret < 0) {
         fprintf(stderr, "kvm_sw64_vcpu_init failed: %s\n", strerror(-ret));
         abort();
@@ -121,34 +125,37 @@ int kvm_arch_get_registers(CPUState *cs)
     int ret, i;
     SW64CPU *cpu = SW64_CPU(cs);
     CPUSW64State *env = &cpu->env;
-
-    ret = kvm_vcpu_ioctl(cs, KVM_GET_REGS, &cpu->k_regs);
+    struct kvm_regs *regs;
+    regs = (struct kvm_regs *)cpu->k_regs;
+    ret = kvm_vcpu_ioctl(cs, KVM_GET_REGS, regs);
     if (ret < 0)
         return ret;
 
     ret = kvm_vcpu_ioctl(cs, KVM_SW64_GET_VCB, &cpu->k_vcb);
     if (ret < 0)
 	return ret;
+    if (test_feature(env, SW64_FEATURE_CORE3)) {
+        for (i = 0; i < 16; i++)
+            env->ir[i] = regs->c3_regs.r[i];
 
-    for (i = 0; i < 16; i++)
-	env->ir[i] = cpu->k_regs[i];
+        for (i = 19; i < 29; i++)
+	    env->ir[i] = regs->c3_regs.r[i-3];
 
-    for (i = 19; i < 29; i++)
-	env->ir[i] = cpu->k_regs[i-3];
+        env->ir[16] = regs->c3_regs.r16;
+        env->ir[17] = regs->c3_regs.r17;
+        env->ir[18] = regs->c3_regs.r18;
 
-    env->ir[16] = cpu->k_regs[155];
-    env->ir[17] = cpu->k_regs[156];
-    env->ir[18] = cpu->k_regs[157];
-
-    env->ir[29] = cpu->k_regs[154];
-
-    if (cpu->k_regs[152] >> 3)
-	env->ir[30] = cpu->k_vcb[3];	//usp
-    else
-	env->ir[30] = cpu->k_vcb[2];	//ksp
-
-    env->pc = cpu->k_regs[153];
-
+        env->ir[29] = regs->c3_regs.gp;
+        env->pc = regs->c3_regs.pc;
+        if (regs->c3_regs.ps >> 3)
+	    env->ir[30] = cpu->k_vcb[3];	//usp
+        else
+	    env->ir[30] = cpu->k_vcb[2];	//ksp
+    } else if (test_feature(env, SW64_FEATURE_CORE4)) {
+        for (i = 0; i < 31; i++)
+            env->ir[i] = regs->c4_regs.r[i];
+        env->pc = regs->c4_regs.pc;
+    }
     return 0;
 }
 
@@ -156,32 +163,38 @@ int kvm_arch_put_registers(CPUState *cs, int level)
 {
     int ret;
     SW64CPU *cpu = SW64_CPU(cs);
-
+    struct kvm_regs *regs;
+    regs = (struct kvm_regs *)cpu->k_regs;
     if (level == KVM_PUT_RUNTIME_STATE) {
-	int i;
-	CPUSW64State *env = &cpu->env;
+        int i;
+        CPUSW64State *env = &cpu->env;
+        if (test_feature(env, SW64_FEATURE_CORE3)) {
+            for (i = 0; i < 16; i++)
+               regs->c3_regs.r[i] = env->ir[i];
 
-	for (i = 0; i < 16; i++)
-	    cpu->k_regs[i] = env->ir[i];
+            for (i = 19; i < 29; i++)
+               regs->c3_regs.r[i-3] = env->ir[i];
 
-	for (i = 19; i < 29; i++)
-	    cpu->k_regs[i-3] = env->ir[i];
+            regs->c3_regs.r16 = env->ir[16];
+            regs->c3_regs.r17 = env->ir[17];
+            regs->c3_regs.r18 = env->ir[18];
 
-	cpu->k_regs[155] = env->ir[16];
-	cpu->k_regs[156] = env->ir[17];
-	cpu->k_regs[157] = env->ir[18];
+            regs->c3_regs.gp  = env->ir[29];
 
-	cpu->k_regs[154] = env->ir[29];
+            if (regs->c3_regs.ps >> 3)
+                cpu->k_vcb[3] = env->ir[30];	//usp
+            else
+                cpu->k_vcb[2] = env->ir[30];	//ksp
 
-	if (cpu->k_regs[152] >> 3)
-	    cpu->k_vcb[3] = env->ir[30];	//usp
-	else
-	    cpu->k_vcb[2] = env->ir[30];	//ksp
-
-	cpu->k_regs[153] = env->pc;
+            regs->c3_regs.pc = env->pc;
+        } else if (test_feature(env, SW64_FEATURE_CORE4)) {
+            for (i = 0; i < 31; i++)
+               regs->c4_regs.r[i] = env->ir[i];
+            regs->c4_regs.pc = env->pc;
+        }
     }
 
-    ret = kvm_vcpu_ioctl(cs, KVM_SET_REGS, &cpu->k_regs);
+    ret = kvm_vcpu_ioctl(cs, KVM_SET_REGS, regs);
     if (ret < 0)
         return ret;
     cpu->k_vcb[15] = kvm_arch_vcpu_id(cs);

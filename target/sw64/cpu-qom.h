@@ -18,16 +18,10 @@
 #define QEMU_SW64_CPU_QOM
 
 #include "hw/core/cpu.h"
+#include "qom/object.h"
 
 #define TYPE_SW64_CPU "sw64-cpu"
-
-#define SW64_CPU_CLASS(kclass) \
-    OBJECT_CLASS_CHECK(SW64CPUClass, (kclass), TYPE_SW64_CPU)
-#define SW64_CPU(obj) \
-    OBJECT_CHECK(SW64CPU, (obj), TYPE_SW64_CPU)
-#define SW64_CPU_GET_CLASS(obj) \
-    OBJECT_GET_CLASS(SW64CPUClass, (obj), TYPE_SW64_CPU)
-
+OBJECT_DECLARE_TYPE(SW64CPU, SW64CPUClass, SW64_CPU)
 /**
  * SW64CPUClass:
  * @parent_realize: The parent class' realize handler.
@@ -42,6 +36,4 @@ typedef struct SW64CPUClass {
     DeviceRealize parent_realize;
     DeviceReset parent_reset;
 } SW64CPUClass;
-
-typedef struct SW64CPU SW64CPU;
 #endif

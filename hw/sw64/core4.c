@@ -22,26 +22,56 @@
 #include "hw/boards.h"
 #include "sysemu/numa.h"
 
-unsigned long core4_init_pc = 0xfff0000000011002;
+#define MAX_CPUS 64
 
 static uint64_t cpu_sw64_virt_to_phys(void *opaque, uint64_t addr)
 {
     return addr &= ~0xfff0000000000000;
 }
 
+static const CPUArchIdList *sw64_possible_cpu_arch_ids(MachineState *ms)
+{
+    int i;
+    unsigned int max_cpus = ms->smp.max_cpus;
+
+    if (ms->possible_cpus) {
+        /*
+         * make sure that max_cpus hasn't changed since the first use, i.e.
+         * -smp hasn't been parsed after it
+        */
+        assert(ms->possible_cpus->len == max_cpus);
+        return ms->possible_cpus;
+    }
+
+    ms->possible_cpus = g_malloc0(sizeof(CPUArchIdList) +
+                                  sizeof(CPUArchId) * max_cpus);
+    ms->possible_cpus->len = max_cpus;
+    for (i = 0; i < ms->possible_cpus->len; i++) {
+        ms->possible_cpus->cpus[i].type = ms->cpu_type;
+        ms->possible_cpus->cpus[i].vcpus_count = 1;
+        ms->possible_cpus->cpus[i].arch_id = i;
+        ms->possible_cpus->cpus[i].props.has_thread_id = true;
+        ms->possible_cpus->cpus[i].props.has_core_id = true;
+        ms->possible_cpus->cpus[i].props.core_id = i;
+    }
+
+    return ms->possible_cpus;
+}
+
+#ifndef CONFIG_KVM
 static void core4_cpu_reset(void *opaque)
 {
     SW64CPU *cpu = opaque;
 
     cpu_reset(CPU(cpu));
 }
+#endif
 
 static void core4_init(MachineState *machine)
 {
     ram_addr_t ram_size = machine->ram_size;
     ram_addr_t buf;
-    SW64CPU *cpus[MAX_CPUS];
-    long i, size;
+    long size;
     const char *kernel_filename = machine->kernel_filename;
     const char *kernel_cmdline = machine->kernel_cmdline;
     const char *initrd_filename = machine->initrd_filename;
@@ -51,15 +81,7 @@ static void core4_init(MachineState *machine)
     uint64_t kernel_entry, kernel_low, kernel_high;
     BOOT_PARAMS *core4_boot_params = g_new0(BOOT_PARAMS, 1);
     uint64_t param_offset;
-    memset(cpus, 0, sizeof(cpus));
-
-    for (i = 0; i < machine->smp.cpus; ++i) {
-        cpus[i] = SW64_CPU(cpu_create(machine->cpu_type));
-        cpus[i]->env.csr[CID] = i;
-        qemu_register_reset(core4_cpu_reset, cpus[i]);
-    }
-
-    core4_board_init(cpus, machine->ram);
+    core4_board_init(machine);
     if (kvm_enabled())
         buf = ram_size;
     else
@@ -87,13 +109,6 @@ static void core4_init(MachineState *machine)
         exit(1);
     }
     g_free(hmcode_filename);
-
-    /* Start all cpus at the hmcode RESET entry point.  */
-    for (i = 0; i < machine->smp.cpus; ++i) {
-        cpus[i]->env.pc = hmcode_entry;
-        cpus[i]->env.hm_entry = hmcode_entry;
-    }
-
     if (!kernel_filename) {
         uefi_filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, "core4-bios-virtio.bin");
 	if (uefi_filename == NULL) {
@@ -116,7 +131,6 @@ static void core4_init(MachineState *machine)
             error_report("could not load kernel '%s'", kernel_filename);
             exit(1);
         }
-        cpus[0]->env.trap_arg1 = kernel_entry;
         if (kernel_cmdline) {
             pstrcpy_targphys("cmdline", param_offset, 0x400, kernel_cmdline);
         }
@@ -138,6 +152,18 @@ static void core4_init(MachineState *machine)
         core4_boot_params->initrd_size = initrd_size;
         rom_add_blob_fixed("core4_boot_params", (core4_boot_params), 0x48, 0x90A100);
     }
+
+#ifndef CONFIG_KVM
+    CPUState *cpu;
+    SW64CPU *sw64_cpu;
+    CPU_FOREACH(cpu) {
+        sw64_cpu = SW64_CPU(cpu);
+        sw64_cpu->env.pc = hmcode_entry;
+        sw64_cpu->env.hm_entry = hmcode_entry;
+        sw64_cpu->env.csr[CID] = sw64_cpu->cid;
+        qemu_register_reset(core4_cpu_reset, sw64_cpu);
+    }
+#endif
 }
 
 static void board_reset(MachineState *state)
@@ -145,15 +171,28 @@ static void board_reset(MachineState *state)
     qemu_devices_reset();
 }
 
-static void core4_machine_init(MachineClass *mc)
+static void core4_machine_class_init(ObjectClass *oc, void *data)
 {
+    MachineClass *mc = MACHINE_CLASS(oc);
     mc->desc = "CORE4 BOARD";
     mc->init = core4_init;
     mc->block_default_type = IF_IDE;
     mc->max_cpus = MAX_CPUS;
     mc->reset = board_reset;
-    mc->default_ram_id = "ram";
+    mc->possible_cpu_arch_ids = sw64_possible_cpu_arch_ids;
     mc->default_cpu_type = SW64_CPU_TYPE_NAME("core4");
+    mc->default_ram_id = "ram";
 }
 
-DEFINE_MACHINE("core4", core4_machine_init)
+static const TypeInfo core4_machine_info = {
+    .name          = TYPE_CORE4_MACHINE,
+    .parent        = TYPE_MACHINE,
+    .class_init    = core4_machine_class_init,
+    .instance_size = sizeof(CORE4MachineState),
+};
+
+static void core4_machine_init(void)
+{
+    type_register_static(&core4_machine_info);
+}
+type_init(core4_machine_init);

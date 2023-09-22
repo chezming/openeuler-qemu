@@ -229,7 +229,7 @@ static inline SW64CPU *sw64_env_get_cpu(CPUSW64State *env)
 #define SW64_CPU_TYPE_NAME(name) (name SW64_CPU_TYPE_SUFFIX)
 #define cpu_list sw64_cpu_list
 int cpu_sw64_signal_handler(int host_signum, void *pinfo, void *puc);
-int sw64_cpu_gdb_read_register(CPUState *cs, uint8_t *buf, int reg);
+int sw64_cpu_gdb_read_register(CPUState *cs, GByteArray *buf, int reg);
 int sw64_cpu_gdb_write_register(CPUState *cs, uint8_t *buf, int reg);
 bool sw64_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
 		      MMUAccessType access_type, int mmu_idx,

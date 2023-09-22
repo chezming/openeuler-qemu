@@ -27,8 +27,8 @@
 #include "sysemu/numa.h"
 #include "qemu/uuid.h"
 #include "qemu/bswap.h"
-unsigned long core3_init_pc = 0xfff0000000011100;
 #define VMUUID 0xFF40
+#define MAX_CPUS_CORE3 64
 static uint64_t cpu_sw64_virt_to_phys(void *opaque, uint64_t addr)
 {
     return addr &= ~0xffffffff80000000 ;
@@ -79,19 +79,20 @@ static const CPUArchIdList *sw64_possible_cpu_arch_ids(MachineState *ms)
     return ms->possible_cpus;
 }
 
+#ifndef CONFIG_KVM
 static void core3_cpu_reset(void *opaque)
 {
     SW64CPU *cpu = opaque;
 
     cpu_reset(CPU(cpu));
 }
+#endif
 
 static void core3_init(MachineState *machine)
 {
     ram_addr_t ram_size = machine->ram_size;
     ram_addr_t buf;
-    SW64CPU *cpus[machine->smp.max_cpus];
-    long i, size;
+    long size;
     const char *kernel_filename = machine->kernel_filename;
     const char *kernel_cmdline = machine->kernel_cmdline;
     const char *initrd_filename = machine->initrd_filename;
@@ -102,14 +103,7 @@ static void core3_init(MachineState *machine)
     BOOT_PARAMS *core3_boot_params = g_new0(BOOT_PARAMS, 1);
     uint64_t param_offset;
     QemuUUID uuid_out_put;
-    memset(cpus, 0, sizeof(cpus));
-
-    for (i = 0; i < machine->smp.cpus; ++i) {
-	cpus[i] = SW64_CPU(cpu_create(machine->cpu_type));
-	cpus[i]->env.csr[CID] = i;
-	qemu_register_reset(core3_cpu_reset, cpus[i]);
-    }
-    core3_board_init(cpus, machine->ram);
+    core3_board_init(machine);
     if (kvm_enabled())
         buf = ram_size;
     else
@@ -142,15 +136,6 @@ static void core3_init(MachineState *machine)
     }
     g_free(hmcode_filename);
 
-    /* Start all cpus at the hmcode RESET entry point.  */
-    for (i = 0; i < machine->smp.cpus; ++i) {
-	if (kvm_enabled())
-	    cpus[i]->env.pc = core3_init_pc;
-	else
-	    cpus[i]->env.pc = hmcode_entry;
-        cpus[i]->env.hm_entry = hmcode_entry;
-    }
-
     if (!kernel_filename) {
 	uefi_filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, "uefi-bios-sw");
 	if (uefi_filename == NULL) {
@@ -171,7 +156,6 @@ static void core3_init(MachineState *machine)
 	    error_report("could not load kernel '%s'", kernel_filename);
 	    exit(1);
 	}
-	cpus[0]->env.trap_arg1 = kernel_entry;
 	if (kernel_cmdline)
 	    pstrcpy_targphys("cmdline", param_offset, 0x400, kernel_cmdline);
     }
@@ -192,6 +176,17 @@ static void core3_init(MachineState *machine)
         core3_boot_params->initrd_size = initrd_size;
         rom_add_blob_fixed("core3_boot_params", (core3_boot_params), 0x48, 0x90A100);
     }
+#ifndef CONFIG_KVM
+    CPUState *cpu;
+    SW64CPU *sw64_cpu;
+    CPU_FOREACH(cpu) {
+        sw64_cpu = SW64_CPU(cpu);
+        sw64_cpu->env.pc = hmcode_entry;
+        sw64_cpu->env.hm_entry = hmcode_entry;
+        sw64_cpu->env.csr[CID] = sw64_cpu->cid;
+        qemu_register_reset(core3_cpu_reset, sw64_cpu);
+    }
+#endif
 }
 
 static void board_reset(MachineState *state)
@@ -199,8 +194,9 @@ static void board_reset(MachineState *state)
     qemu_devices_reset();
 }
 
-static void core3_machine_init(MachineClass *mc)
+static void core3_machine_class_init(ObjectClass *oc, void *data)
 {
+    MachineClass *mc = MACHINE_CLASS(oc);
     mc->desc = "core3 BOARD";
     mc->init = core3_init;
     mc->block_default_type = IF_IDE;
@@ -215,4 +211,15 @@ static void core3_machine_init(MachineClass *mc)
     mc->get_default_cpu_node_id = sw64_get_default_cpu_node_id;
 }
 
-DEFINE_MACHINE("core3", core3_machine_init)
+static const TypeInfo core3_machine_info = {
+    .name          = TYPE_CORE3_MACHINE,
+    .parent        = TYPE_MACHINE,
+    .class_init    = core3_machine_class_init,
+    .instance_size = sizeof(CORE3MachineState),
+};
+
+static void core3_machine_init(void)
+{
+    type_register_static(&core3_machine_info);
+}
+type_init(core3_machine_init);
