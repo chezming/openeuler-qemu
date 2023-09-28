@@ -759,15 +759,19 @@ for opt do
   ;;
   --gdb=*) gdb_bin="$optarg"
   ;;
+  --disable-vt-iommu) vt_iommu="no"
+  ;;
+  --enable-vt-iommu) vt_iommu="yes"
+  ;;
+  --disable-vhost-net) vhost_net="no"
+  ;;
+  --enable-vhost-net) vhost_net="yes"
+  ;;
   # everything else has the same name in configure and meson
   --*) meson_option_parse "$opt" "$optarg"
   ;;
   # Pass through -Dxxxx options to meson
   -D*) meson_options="$meson_options $opt"
-  ;;
-  --disable-vt-iommu) vt_iommu="no"
-  ;;
-  --enable-vt-iommu) vt_iommu="yes"
   ;;
   esac
 done

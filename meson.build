@@ -4126,6 +4126,7 @@ if 'simple' in get_option('trace_backends')
   summary_info += {'Trace output file': get_option('trace_file') + '-<pid>'}
 endif
 summary_info += {'D-Bus display':     dbus_display}
+summary_info += {'vt-iommu':     config_host.has_key('CONFIG_SW64_VT_IOMMU')}
 summary_info += {'QOM debugging':     get_option('qom_cast_debug')}
 summary_info += {'Relocatable install': get_option('relocatable')}
 summary_info += {'vhost-kernel support': have_vhost_kernel}
