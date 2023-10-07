@@ -75,6 +75,14 @@ static void core3_init(MachineState *machine)
     }
 }
 
+static void core3_machine_initfn(Object *obj)
+{
+    CORE3MachineState *swms = CORE3_MACHINE(obj);
+
+    swms->oem_id = g_strndup("SUNWAY", 6);
+    swms->oem_table_id = g_strndup("SUNWAY. ", 8);
+}
+
 static void core3_machine_class_init(ObjectClass *oc, void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
@@ -96,6 +104,7 @@ static const TypeInfo core3_machine_info = {
     .name          = TYPE_CORE3_MACHINE,
     .parent        = TYPE_MACHINE,
     .class_init    = core3_machine_class_init,
+    .instance_init = core3_machine_initfn,
     .instance_size = sizeof(CORE3MachineState),
 };
 

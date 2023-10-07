@@ -2,6 +2,7 @@ sw64_ss = ss.source_set()
 
 sw64_ss.add(files('sunway.c'))
 sw64_ss.add(when: 'CONFIG_SW64_VT_IOMMU', if_true: files('sw64_iommu.c'))
+sw64_ss.add(when: 'CONFIG_ACPI', if_true: files('sw64-acpi-build.c'))
 
 sw64_ss.add(when: 'CONFIG_CORE3', if_true: files(
   'core3.c',

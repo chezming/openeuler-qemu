@@ -35,6 +35,13 @@
 #define MAX_IDE_BUS 2
 #define SW_FW_CFG_P_BASE (0x804920000000ULL)
 
+static const MemMapEntry base_memmap[] = {
+    [VIRT_PCIE_PIO] =           { 0x880100000000, 0x100000000 },
+    [VIRT_PCIE_MMIO] =          {     0xe0000000,  0x20000000 },
+    [VIRT_PCIE_CFG] =           { 0x880600000000,  0x10000000 },
+    [VIRT_HIGH_PCIE_MMIO] =     { 0x888000000000, 0x8000000000 },
+};
+
 static void core3_virt_build_smbios(CORE3MachineState *core3ms)
 {
     FWCfgState *fw_cfg = core3ms->fw_cfg;
@@ -188,6 +195,7 @@ void core3_board_init(MachineState *ms)
     DeviceState *dev = qdev_new(TYPE_CORE3_BOARD);
     BoardState *bs = CORE3_BOARD(dev);
     PCIHostState *phb = PCI_HOST_BRIDGE(dev);
+    MemMapEntry memmap[ARRAY_SIZE(base_memmap)];
     uint64_t MB = 1024 * 1024;
     uint64_t GB = 1024 * MB;
     PCIBus *b;
@@ -244,6 +252,10 @@ void core3_board_init(MachineState *ms)
 
     core3ms->fw_cfg = sw64_create_fw_cfg(SW_FW_CFG_P_BASE);
     rom_set_fw(core3ms->fw_cfg);
+
+    core3ms->bus = phb->bus;
+    core3ms->memmap = memmap;
+    sw64_acpi_setup((SW64MachineState*)core3ms);
 
     core3_virt_build_smbios(core3ms);
 }

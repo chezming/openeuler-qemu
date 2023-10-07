@@ -13,6 +13,24 @@
 #define CORE4_BOARD(obj) \
     OBJECT_CHECK(BoardState, (obj), TYPE_CORE4_BOARD)
 
+struct SW64MachineClass {
+    MachineClass parent;
+};
+
+struct SW64MachineState {
+    MachineState parent;
+    FWCfgState *fw_cfg;
+    DeviceState *acpi_dev;
+    PCIBus *bus;
+    char *oem_id;
+    char *oem_table_id;
+    MemMapEntry *memmap;
+    const int *irqmap;
+};
+
+#define TYPE_SW64_MACHINE   MACHINE_TYPE_NAME("sw64")
+OBJECT_DECLARE_TYPE(SW64MachineState, SW64MachineClass, SW64_MACHINE)
+
 struct CORE3MachineClass {
     MachineClass parent;
 };
@@ -24,6 +42,8 @@ struct CORE3MachineState {
     PCIBus *bus;
     char *oem_id;
     char *oem_table_id;
+    MemMapEntry *memmap;
+    const int *irqmap;
 };
 
 #define TYPE_CORE3_MACHINE   MACHINE_TYPE_NAME("core3")
@@ -40,6 +60,8 @@ struct CORE4MachineState {
     PCIBus *bus;
     char *oem_id;
     char *oem_table_id;
+    MemMapEntry *memmap;
+    const int *irqmap;
 };
 
 #define TYPE_CORE4_MACHINE   MACHINE_TYPE_NAME("core4")
@@ -65,6 +87,13 @@ typedef struct TimerState {
     int order;
 } TimerState;
 
+enum {
+    VIRT_PCIE_PIO,
+    VIRT_PCIE_MMIO,
+    VIRT_PCIE_CFG,
+    VIRT_HIGH_PCIE_MMIO,
+};
+
 typedef struct boot_params {
     unsigned long initrd_start;                     /* logical address of initrd */
     unsigned long initrd_size;                      /* size of initrd */
@@ -79,4 +108,5 @@ typedef struct boot_params {
 
 void core3_board_init(MachineState *machine);
 void core4_board_init(MachineState *machine);
+void sw64_acpi_setup(SW64MachineState *vms);
 #endif
