@@ -2,6 +2,7 @@
 #include "qapi/error.h"
 #include "cpu.h"
 #include "hw/sw64/core.h"
+#include "hw/sw64/sunway.h"
 #include "hw/hw.h"
 #include "hw/boards.h"
 #include "sysemu/sysemu.h"
@@ -17,77 +18,50 @@
 #include "sysemu/numa.h"
 #include "sysemu/kvm.h"
 #include "hw/pci/msi.h"
-#include "hw/sw64/sw64_iommu.h"
+
+#define CORE4_MAX_CPUS_MASK             0x3ff
+#define CORE4_CORES_SHIFT               10
+#define CORE4_CORES_MASK                0x3ff
+#define CORE4_THREADS_SHIFT             20
+#define CORE4_THREADS_MASK              0xfff
 
 #define MAX_IDE_BUS 2
-#define DEBUGWYH 0
-#define SW_PIN_TO_IRQ 16
+#define SW_FW_CFG_P_BASE (0x804920000000ULL)
 
-static void swboard_alarm_timer(void *opaque)
+static void core4_virt_build_smbios(CORE4MachineState *core4ms)
 {
-    TimerState *ts = (TimerState *)((uintptr_t)opaque);
-    int cpu = ts->order;
+    FWCfgState *fw_cfg = core4ms->fw_cfg;
 
-    if (kvm_enabled())
+    if (!fw_cfg)
 	return;
 
-    cpu_interrupt(qemu_get_cpu(cpu), CPU_INTERRUPT_TIMER);
+    sw64_virt_build_smbios(fw_cfg);
 }
 
-static PCIINTxRoute sw_route_intx_pin_to_irq(void *opaque, int pin)
-{
-	PCIINTxRoute route;
-
-	route.mode = PCI_INTX_ENABLED;
-	route.irq = SW_PIN_TO_IRQ;
-	return route;
-}
-
-static uint64_t convert_bit(int n)
-{
-    uint64_t ret = (1UL << n) - 1;
-
-    if (n == 64)
-        ret = 0xffffffffffffffffUL;
-    return ret;
-}
-
-static uint64_t mcu_read(void *opaque, hwaddr addr, unsigned size)
+static uint64_t spbu_read(void *opaque, hwaddr addr, unsigned size)
 {
     MachineState *ms = MACHINE(qdev_get_machine());
     unsigned int smp_cpus = ms->smp.cpus;
+    unsigned int smp_threads = ms->smp.threads;
+    unsigned int smp_cores = ms->smp.cores;
+    unsigned int max_cpus = ms->smp.max_cpus;
     uint64_t ret = 0;
     switch (addr) {
-    case 0x0000:
-    /* CG_ONLINE */
+    case 0x0080:
+    /* SMP_INFO */
 	{
-	    int i;
-            for (i = 0; i < smp_cpus; i = i + 4)
-	        ret |= (1UL << i);
-        }
-        break;
-    /*IO_START*/
-    case 0x1300:
-        ret = 0x1;
-        break;
-    case 0x3780:
-	/* MC_ONLINE */
-        ret = convert_bit(smp_cpus);
-        break;
-    case 0x0900:
-	/* CPUID */
-        ret = 0;
-        break;
-    case 0x4900:
-        /* MC_CONFIG */
-        break;
+	    ret = (smp_threads & CORE4_THREADS_MASK) << CORE4_THREADS_SHIFT;
+	    ret += (smp_cores & CORE4_CORES_MASK) << CORE4_CORES_SHIFT;
+	    ret += max_cpus & CORE4_MAX_CPUS_MASK;
+	}
+	break;
     case 0x0780:
         /* CORE_ONLINE */
         ret = convert_bit(smp_cpus);
         break;
-    case 0x0680:
-        /* INIT_CTL */
-        ret = 0x000003AE00000D28;
+    case 0x3780:
+	/* MC_ONLINE */
+        ret = convert_bit(smp_cpus);
         break;
     default:
         fprintf(stderr, "Unsupported MCU addr: 0x%04lx\n", addr);
@@ -96,7 +70,7 @@ static uint64_t mcu_read(void *opaque, hwaddr addr, unsigned size)
     return ret;
 }
 
-static void mcu_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
+static void spbu_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
 {
 #ifdef CONFIG_DUMP_PRINTK
     uint64_t print_addr;
@@ -122,9 +96,9 @@ static void mcu_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
 #endif
 }
 
-static const MemoryRegionOps mcu_ops = {
-    .read = mcu_read,
-    .write = mcu_write,
+static const MemoryRegionOps spbu_ops = {
+    .read = spbu_read,
+    .write = spbu_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
     .valid =
         {
@@ -154,7 +128,7 @@ static void intpu_write(void *opaque, hwaddr addr, uint64_t val,
 
     switch (addr) {
     case 0x00:
-	cpu_interrupt(qemu_get_cpu(val&0x3f), CPU_INTERRUPT_II0);
+	cpu_interrupt(qemu_get_cpu(val & 0x3f), CPU_INTERRUPT_II0);
 	cpu_current->env.csr[II_REQ] &= ~(1 << 20);
 	break;
     default:
@@ -179,202 +153,67 @@ static const MemoryRegionOps intpu_ops = {
         },
 };
 
-static uint64_t rtc_read(void *opaque, hwaddr addr, unsigned size)
-{
-    uint64_t val = get_clock_realtime() / NANOSECONDS_PER_SECOND;
-    return val;
-}
-
-static void rtc_write(void *opaque, hwaddr addr, uint64_t val,
-		      unsigned size)
-{
-}
-
-static const MemoryRegionOps rtc_ops = {
-    .read = rtc_read,
-    .write = rtc_write,
-    .endianness = DEVICE_LITTLE_ENDIAN,
-    .valid =
-        {
-            .min_access_size = 1,
-            .max_access_size = 8,
-        },
-    .impl =
-        {
-            .min_access_size = 1,
-            .max_access_size = 8,
-        },
-};
-
-static uint64_t ignore_read(void *opaque, hwaddr addr, unsigned size)
-{
-    return 1;
-}
-
-static void ignore_write(void *opaque, hwaddr addr, uint64_t v,
-		         unsigned size)
-{
-}
-
-const MemoryRegionOps core4_pci_ignore_ops = {
-    .read = ignore_read,
-    .write = ignore_write,
-    .endianness = DEVICE_LITTLE_ENDIAN,
-    .valid =
-        {
-            .min_access_size = 1,
-            .max_access_size = 8,
-        },
-    .impl =
-        {
-            .min_access_size = 1,
-            .max_access_size = 8,
-        },
-};
-
-static uint64_t config_read(void *opaque, hwaddr addr, unsigned size)
-{
-    PCIBus *b = opaque;
-    uint32_t trans_addr = 0;
-    trans_addr |= ((addr >> 16) & 0xffff) << 8;
-    trans_addr |= (addr & 0xff);
-    return pci_data_read(b, trans_addr, size);
-}
-
-static void config_write(void *opaque, hwaddr addr, uint64_t val,
-                         unsigned size)
-{
-    PCIBus *b = opaque;
-    uint32_t trans_addr = 0;
-    trans_addr |= ((addr >> 16) & 0xffff) << 8;
-    trans_addr |= (addr & 0xff);
-    pci_data_write(b, trans_addr, val, size);
-}
-
-const MemoryRegionOps core4_pci_config_ops = {
-    .read = config_read,
-    .write = config_write,
-    .endianness = DEVICE_LITTLE_ENDIAN,
-    .valid =
-        {
-            .min_access_size = 1,
-            .max_access_size = 8,
-        },
-    .impl =
-        {
-            .min_access_size = 1,
-            .max_access_size = 8,
-        },
-};
-
-static void swboard_set_irq(void *opaque, int irq, int level)
-{
-    if (level == 0)
-        return;
-
-    if (kvm_enabled()) {
-        kvm_set_irq(kvm_state, irq, level);
-        return;
-    }
-
-    cpu_interrupt(qemu_get_cpu(0), CPU_INTERRUPT_PCIE);
-}
-
-static int swboard_map_irq(PCIDevice *d, int irq_num)
-{
-    return 16;
-}
-
-static void serial_set_irq(void *opaque, int irq, int level)
-{
-    if (level == 0)
-        return;
-    if (kvm_enabled()) {
-        kvm_set_irq(kvm_state, irq, level);
-        return;
-    }
-    cpu_interrupt(qemu_get_cpu(0), CPU_INTERRUPT_HARD);
-}
-
-static void sw64_new_cpu(const char *typename, int64_t arch_id, Error **errp)
-{
-    Object *cpu = NULL;
-    Error *local_err = NULL;
-
-    cpu = object_new(typename);
-    object_property_set_uint(cpu, "cid", arch_id, &local_err);
-    object_property_set_bool(cpu, "realized", true, &local_err);
-
-    object_unref(cpu);
-    error_propagate(errp, local_err);
-}
-
 static void core4_cpus_init(MachineState *ms)
 {
     int i;
     const CPUArchIdList *possible_cpus;
+
     MachineClass *mc = MACHINE_GET_CLASS(ms);
     possible_cpus = mc->possible_cpu_arch_ids(ms);
+
     for (i = 0; i < ms->smp.cpus; i++) {
-            sw64_new_cpu("core4-sw64-cpu", possible_cpus->cpus[i].arch_id, &error_fatal);
+        sw64_new_cpu("core4-sw64-cpu", possible_cpus->cpus[i].arch_id,
+		     &error_fatal);
     }
 }
 
 void core4_board_init(MachineState *ms)
 {
-    DeviceState *dev;
-    BoardState *bs;
+    CORE4MachineState *core4ms = CORE4_MACHINE(ms);
+    DeviceState *dev = qdev_new(TYPE_CORE4_BOARD);
+    BoardState *bs = CORE4_BOARD(dev);
+    PCIHostState *phb = PCI_HOST_BRIDGE(dev);
     uint64_t MB = 1024 * 1024;
-    PCIBus *b;
-    PCIHostState *phb;
     uint64_t GB = 1024 * MB;
-    int i;
+    PCIBus *b;
+
     core4_cpus_init(ms);
-    dev = qdev_new(TYPE_CORE4_BOARD);
-    bs = CORE4_BOARD(dev);
-    phb = PCI_HOST_BRIDGE(dev);
+
     if (kvm_enabled()) {
         if (kvm_has_gsi_routing())
             msi_nonbroken = true;
     }
-    else {
-        TimerState *ts;
-        SW64CPU *cpu;
-        for (i = 0; i < ms->smp.cpus; ++i) {
-            cpu = SW64_CPU(qemu_get_cpu(i));
-            ts = g_new(TimerState, 1);
-            ts->opaque = (void *) ((uintptr_t)bs);
-            ts->order = i;
-            cpu->alarm_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, &swboard_alarm_timer, ts);
-	}
-    }
+    else
+        sw64_create_alarm_timer(ms, bs);
+
     memory_region_add_subregion(get_system_memory(), 0, ms->ram);
-    memory_region_init_io(&bs->io_mcu, NULL, &mcu_ops, bs, "io_mcu", 16 * MB);
-    memory_region_add_subregion(get_system_memory(), 0x803000000000ULL, &bs->io_mcu);
+
+    memory_region_init_io(&bs->io_spbu, NULL, &spbu_ops, bs, "io_spbu", 16 * MB);
+    memory_region_add_subregion(get_system_memory(), 0x803000000000ULL, &bs->io_spbu);
 
     memory_region_init_io(&bs->io_intpu, NULL, &intpu_ops, bs, "io_intpu", 1 * MB);
-    memory_region_add_subregion(get_system_memory(), 0x802a00000000ULL,
+    memory_region_add_subregion(get_system_memory(), 0x803a00000000ULL,
                                 &bs->io_intpu);
+
+    memory_region_init_io(&bs->msi_ep, NULL, &msi_ops, bs, "msi_ep", 1 * MB);
+    memory_region_add_subregion(get_system_memory(), 0x8000fee00000ULL, &bs->msi_ep);
+
     memory_region_init(&bs->mem_ep, OBJECT(bs), "pci0-mem", 0x890000000000ULL);
     memory_region_add_subregion(get_system_memory(), 0x880000000000ULL, &bs->mem_ep);
 
     memory_region_init_alias(&bs->mem_ep64, NULL, "mem_ep64", &bs->mem_ep, 0x888000000000ULL, 1ULL << 39);
     memory_region_add_subregion(get_system_memory(), 0x888000000000ULL, &bs->mem_ep64);
 
-    memory_region_init_io(&bs->io_ep, OBJECT(bs), &core4_pci_ignore_ops, NULL,
+    memory_region_init_io(&bs->io_ep, OBJECT(bs), &sw64_pci_ignore_ops, NULL,
                           "pci0-io-ep", 4 * GB);
-
     memory_region_add_subregion(get_system_memory(), 0x880100000000ULL, &bs->io_ep);
-    b = pci_register_root_bus(dev, "pci.0", swboard_set_irq, swboard_map_irq, bs,
+
+    b = pci_register_root_bus(dev, "pcie.0", sw64_board_set_irq, sw64_board_map_irq, bs,
                               &bs->mem_ep, &bs->io_ep, 0, 537, TYPE_PCI_BUS);
     phb->bus = b;
     sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
-    pci_bus_set_route_irq_fn(b, sw_route_intx_pin_to_irq);
-    memory_region_init_io(&bs->io_piu0, OBJECT(bs), &core4_pci_ignore_ops, NULL,
-                          "pci0-piu1-io", 4 * GB);
-    memory_region_add_subregion(get_system_memory(), 0x880300000000ULL,
-                                &bs->io_piu0);
-    memory_region_init_io(&bs->conf_piu0, OBJECT(bs), &core4_pci_config_ops, b,
+    pci_bus_set_route_irq_fn(b, sw64_route_intx_pin_to_irq);
+    memory_region_init_io(&bs->conf_piu0, OBJECT(bs), &sw64_pci_config_ops, b,
                           "pci0-ep-conf-io", 4 * GB);
     memory_region_add_subregion(get_system_memory(), 0x880600000000ULL,
                                 &bs->conf_piu0);
@@ -382,26 +221,13 @@ void core4_board_init(MachineState *ms)
 		          "sw64-rtc", 0x08ULL);
     memory_region_add_subregion(get_system_memory(), 0x804910000000ULL,
                                 &bs->io_rtc);
-    for (i = 0; i < nb_nics; i++)
-        pci_nic_init_nofail(&nd_table[i], b, "e1000", NULL);
 
-    pci_vga_init(b);
-#define MAX_SATA_PORTS 6
-    PCIDevice *ahci;
-    DriveInfo *hd[MAX_SATA_PORTS];
-    ahci = pci_create_simple_multifunction(b, PCI_DEVFN(0x1f, 0), true,
-		    TYPE_ICH9_AHCI);
-    g_assert(MAX_SATA_PORTS == ahci_get_num_ports(ahci));
-    ide_drive_get(hd, ahci_get_num_ports(ahci));
-    ahci_ide_create_devs(ahci, hd);
-    bs->serial_irq = qemu_allocate_irq(serial_set_irq, bs, 12);
-    if (serial_hd(0)) {
-        serial_mm_init(get_system_memory(), 0x3F8 + 0x880100000000ULL, 0,
-                       bs->serial_irq, (1843200 >> 4), serial_hd(0),
-                       DEVICE_LITTLE_ENDIAN);
-    }
+    sw64_create_pcie(bs, b, phb);
 
-    pci_create_simple(phb->bus, -1, "nec-usb-xhci");
+    core4ms->fw_cfg = sw64_create_fw_cfg(SW_FW_CFG_P_BASE);
+    rom_set_fw(core4ms->fw_cfg);
+
+    core4_virt_build_smbios(core4ms);
 }
 
 static const TypeInfo swboard_pcihost_info = {

@@ -37,7 +37,7 @@ blobs = [
   'vgabios-ramfb.bin',
   'vgabios-bochs-display.bin',
   'vgabios-ati.bin',
-  'uefi-bios-sw',
+  'c3-uefi-bios-sw',
   'core3-reset',
   'core3-hmcode',
   'core4-reset',

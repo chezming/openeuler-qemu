@@ -47,6 +47,7 @@ OBJECT_DECLARE_TYPE(CORE4MachineState, CORE4MachineClass, CORE4_MACHINE)
 typedef struct BoardState {
     PCIHostState parent_obj;
     MemoryRegion io_mcu;
+    MemoryRegion io_spbu;
     MemoryRegion io_intpu;
     MemoryRegion msi_ep;
     MemoryRegion mem_ep;
