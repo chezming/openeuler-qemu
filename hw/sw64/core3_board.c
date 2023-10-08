@@ -47,7 +47,6 @@ static FWCfgState *sw_create_fw_cfg(hwaddr addr)
     return fw_cfg;
 }
 
-#ifdef CONFIG_KVM
 static void sw64_virt_build_smbios(CORE3MachineState *swms)
 {
     uint8_t *smbios_tables, *smbios_anchor;
@@ -60,35 +59,35 @@ static void sw64_virt_build_smbios(CORE3MachineState *swms)
 
     if (kvm_enabled()) {
         product = "KVM Virtual Machine";
-    }
-    smbios_set_defaults("QEMU", product,
-                        "sw64", false,
-                        true, SMBIOS_ENTRY_POINT_30);
+ 
+	smbios_set_defaults("QEMU", product,
+                            "sw64", false,
+                            true, SMBIOS_ENTRY_POINT_30);
 
 
-    smbios_get_tables(MACHINE(qdev_get_machine()), NULL, 0,
-		      &smbios_tables, &smbios_tables_len,
-                      &smbios_anchor, &smbios_anchor_len,
-		      &error_fatal);
+        smbios_get_tables(MACHINE(qdev_get_machine()), NULL, 0,
+		          &smbios_tables, &smbios_tables_len,
+                          &smbios_anchor, &smbios_anchor_len,
+		          &error_fatal);
 
-    if (smbios_anchor) {
-        fw_cfg_add_file(swms->fw_cfg, "etc/smbios/smbios-tables",
-                        smbios_tables, smbios_tables_len);
-        fw_cfg_add_file(swms->fw_cfg, "etc/smbios/smbios-anchor",
-                        smbios_anchor, smbios_anchor_len);
+        if (smbios_anchor) {
+            fw_cfg_add_file(swms->fw_cfg, "etc/smbios/smbios-tables",
+                            smbios_tables, smbios_tables_len);
+            fw_cfg_add_file(swms->fw_cfg, "etc/smbios/smbios-anchor",
+                            smbios_anchor, smbios_anchor_len);
+	}
     }
 }
-#endif
 
-#ifndef CONFIG_KVM
 static void swboard_alarm_timer(void *opaque)
 {
     TimerState *ts = (TimerState *)((uintptr_t)opaque);
 
-    int cpu = ts->order;
-    cpu_interrupt(qemu_get_cpu(cpu), CPU_INTERRUPT_TIMER);
+    if (!kvm_enabled()) {
+        int cpu = ts->order;
+        cpu_interrupt(qemu_get_cpu(cpu), CPU_INTERRUPT_TIMER);
+    }
 }
-#endif
 
 static PCIINTxRoute sw_route_intx_pin_to_irq(void *opaque, int pin)
 {
@@ -172,11 +171,13 @@ static uint64_t mcu_read(void *opaque, hwaddr addr, unsigned size)
 
 static void mcu_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
 {
-#ifndef CONFIG_KVM
 #ifdef CONFIG_DUMP_PRINTK
     uint64_t print_addr;
     uint32_t len;
     int i;
+
+    if (kvm_enabled())
+	return;
 
     if (addr == 0x40000) {
         print_addr = val & 0x7fffffff;
@@ -191,7 +192,6 @@ static void mcu_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
         free(buf);
         return;
     }
-#endif
 #endif
 }
 
@@ -214,22 +214,27 @@ static const MemoryRegionOps mcu_ops = {
 static uint64_t intpu_read(void *opaque, hwaddr addr, unsigned size)
 {
     uint64_t ret = 0;
-#ifndef CONFIG_KVM
+
+    if (kvm_enabled())
+	return ret;
+
     switch (addr) {
     case 0x180:
     /* LONGTIME */
         ret = qemu_clock_get_ns(QEMU_CLOCK_HOST) / 32;
         break;
     }
-#endif
     return ret;
 }
 
 static void intpu_write(void *opaque, hwaddr addr, uint64_t val,
                         unsigned size)
 {
-#ifndef CONFIG_KVM
     SW64CPU *cpu_current = SW64_CPU(current_cpu);
+
+    if (kvm_enabled())
+	return;
+
     switch (addr) {
     case 0x00:
         cpu_interrupt(qemu_get_cpu(val&0x3f), CPU_INTERRUPT_II0);
@@ -239,7 +244,6 @@ static void intpu_write(void *opaque, hwaddr addr, uint64_t val,
         fprintf(stderr, "Unsupported IPU addr: 0x%04lx\n", addr);
         break;
     }
-#endif
 }
 
 static const MemoryRegionOps intpu_ops = {
@@ -269,9 +273,11 @@ MemTxResult msi_write(void *opaque, hwaddr addr,
                       uint64_t value, unsigned size,
                       MemTxAttrs attrs)
 {
-#ifdef CONFIG_KVM
     int ret = 0;
     MSIMessage msg = {};
+
+    if (!kvm_enabled())
+	return MEMTX_DECODE_ERROR;
 
     msg.address = (uint64_t) addr + 0x8000fee00000;
     msg.data = (uint32_t) value;
@@ -281,7 +287,6 @@ MemTxResult msi_write(void *opaque, hwaddr addr,
         fprintf(stderr, "KVM: injection failed, MSI lost (%s)\n",
                 strerror(-ret));
     }
-#endif
     return MEMTX_OK;
 }
 
@@ -461,22 +466,21 @@ void core3_board_init(MachineState *ms)
     bs = CORE3_BOARD(dev);
     phb = PCI_HOST_BRIDGE(dev);
 
-#ifdef CONFIG_KVM
-    if (kvm_has_gsi_routing())
-        msi_nonbroken = true;
-#endif
-
-#ifndef CONFIG_KVM
-    TimerState *ts;
-    SW64CPU *cpu;
-    for (i = 0; i < ms->smp.cpus; ++i) {
-        cpu = SW64_CPU(qemu_get_cpu(i));
-        ts = g_new(TimerState, 1);
-        ts->opaque = (void *) ((uintptr_t)bs);
-        ts->order = i;
-        cpu->alarm_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, &swboard_alarm_timer, ts);
+    if (kvm_enabled()) {
+        if (kvm_has_gsi_routing())
+            msi_nonbroken = true;
     }
-#endif
+    else {
+        TimerState *ts;
+        SW64CPU *cpu;
+        for (i = 0; i < ms->smp.cpus; ++i) {
+            cpu = SW64_CPU(qemu_get_cpu(i));
+            ts = g_new(TimerState, 1);
+            ts->opaque = (void *) ((uintptr_t)bs);
+            ts->order = i;
+            cpu->alarm_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, &swboard_alarm_timer, ts);
+	}
+    }
 
     memory_region_add_subregion(get_system_memory(), 0, ms->ram);
 
@@ -539,9 +543,7 @@ void core3_board_init(MachineState *ms)
     pci_create_simple(phb->bus, -1, "nec-usb-xhci");
     swms->fw_cfg = sw_create_fw_cfg(SW_FW_CFG_P_BASE);
     rom_set_fw(swms->fw_cfg);
-#ifdef CONFIG_KVM
     sw64_virt_build_smbios(swms);
-#endif
 }
 
 static const TypeInfo swboard_pcihost_info = {

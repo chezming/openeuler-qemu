@@ -58,12 +58,10 @@ typedef struct BoardState {
     qemu_irq serial_irq;
 } BoardState;
 
-#ifndef CONFIG_KVM
 typedef struct TimerState {
     void *opaque;
     int order;
 } TimerState;
-#endif
 
 typedef struct boot_params {
         unsigned long initrd_start;                     /* logical address of initrd */

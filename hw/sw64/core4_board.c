@@ -23,15 +23,16 @@
 #define DEBUGWYH 0
 #define SW_PIN_TO_IRQ 16
 
-#ifndef CONFIG_KVM
 static void swboard_alarm_timer(void *opaque)
 {
     TimerState *ts = (TimerState *)((uintptr_t)opaque);
-
     int cpu = ts->order;
+
+    if (kvm_enabled())
+	return;
+
     cpu_interrupt(qemu_get_cpu(cpu), CPU_INTERRUPT_TIMER);
 }
-#endif
 
 static PCIINTxRoute sw_route_intx_pin_to_irq(void *opaque, int pin)
 {
@@ -97,11 +98,14 @@ static uint64_t mcu_read(void *opaque, hwaddr addr, unsigned size)
 
 static void mcu_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
 {
-#ifndef CONFIG_KVM
 #ifdef CONFIG_DUMP_PRINTK
     uint64_t print_addr;
     uint32_t len;
     int i;
+
+    if (kvm_enabled())
+	return;
+
     if (addr == 0x40000) {
         print_addr = val & 0x7fffffff;
         len = (uint32_t)(val >> 32);
@@ -115,7 +119,6 @@ static void mcu_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
         free(buf);
         return;
     }
-#endif
 #endif
 }
 
@@ -144,8 +147,11 @@ static uint64_t intpu_read(void *opaque, hwaddr addr, unsigned size)
 static void intpu_write(void *opaque, hwaddr addr, uint64_t val,
                         unsigned size)
 {
-#ifndef CONFIG_KVM
     SW64CPU *cpu_current = SW64_CPU(current_cpu);
+
+    if (kvm_enabled())
+	return;
+
     switch (addr) {
     case 0x00:
 	cpu_interrupt(qemu_get_cpu(val&0x3f), CPU_INTERRUPT_II0);
@@ -155,7 +161,6 @@ static void intpu_write(void *opaque, hwaddr addr, uint64_t val,
         fprintf(stderr, "Unsupported IPU addr: 0x%04lx\n", addr);
         break;
     }
-#endif
 }
 
 static const MemoryRegionOps intpu_ops = {
@@ -328,22 +333,21 @@ void core4_board_init(MachineState *ms)
     dev = qdev_new(TYPE_CORE4_BOARD);
     bs = CORE4_BOARD(dev);
     phb = PCI_HOST_BRIDGE(dev);
-#ifdef CONFIG_KVM
-    if (kvm_has_gsi_routing())
-        msi_nonbroken = true;
-#endif
-
-#ifndef CONFIG_KVM
-    TimerState *ts;
-    SW64CPU *cpu;
-    for (i = 0; i < ms->smp.cpus; ++i) {
-        cpu = SW64_CPU(qemu_get_cpu(i));
-        ts = g_new(TimerState, 1);
-        ts->opaque = (void *) ((uintptr_t)bs);
-        ts->order = i;
-        cpu->alarm_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, &swboard_alarm_timer, ts);
+    if (kvm_enabled()) {
+        if (kvm_has_gsi_routing())
+            msi_nonbroken = true;
     }
-#endif
+    else {
+        TimerState *ts;
+        SW64CPU *cpu;
+        for (i = 0; i < ms->smp.cpus; ++i) {
+            cpu = SW64_CPU(qemu_get_cpu(i));
+            ts = g_new(TimerState, 1);
+            ts->opaque = (void *) ((uintptr_t)bs);
+            ts->order = i;
+            cpu->alarm_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, &swboard_alarm_timer, ts);
+	}
+    }
     memory_region_add_subregion(get_system_memory(), 0, ms->ram);
     memory_region_init_io(&bs->io_mcu, NULL, &mcu_ops, bs, "io_mcu", 16 * MB);
     memory_region_add_subregion(get_system_memory(), 0x803000000000ULL, &bs->io_mcu);
