@@ -25,9 +25,6 @@
 #include "hw/sw64/core.h"
 #include "hw/boards.h"
 #include "sysemu/numa.h"
-#include "qemu/uuid.h"
-#include "qemu/bswap.h"
-#define VMUUID 0xFF40
 #define MAX_CPUS_CORE3 64
 static uint64_t cpu_sw64_virt_to_phys(void *opaque, uint64_t addr)
 {
@@ -102,7 +99,6 @@ static void core3_init(MachineState *machine)
     uint64_t kernel_entry, kernel_low, kernel_high;
     BOOT_PARAMS *core3_boot_params = g_new0(BOOT_PARAMS, 1);
     uint64_t param_offset;
-    QemuUUID uuid_out_put;
     core3_board_init(machine);
     if (kvm_enabled())
         buf = ram_size;
@@ -111,9 +107,6 @@ static void core3_init(MachineState *machine)
 
     rom_add_blob_fixed("ram_size", (char *)&buf, 0x8, 0x2040);
 
-    uuid_out_put = qemu_uuid;
-    uuid_out_put = qemu_uuid_bswap(uuid_out_put);
-    pstrcpy_targphys("vm-uuid", VMUUID, 0x12, (char *)&(uuid_out_put));
     param_offset = 0x90B000UL;
     core3_boot_params->cmdline = param_offset | 0xfff0000000000000UL;
 
