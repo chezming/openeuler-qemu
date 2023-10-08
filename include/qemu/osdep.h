@@ -424,6 +424,9 @@ static inline void qemu_cleanup_generic_vfree(void *p)
  */
 #define QEMU_MAP_NORESERVE  (1 << 3)
 
+/* map fixed addree for vhost user mode */
+#define QEMU_MAP_FIXED  (1 << 4)
+
 
 #define QEMU_MADV_INVALID -1
 
@@ -641,6 +644,15 @@ static inline void qemu_timersub(const struct timeval *val1,
 #endif
 
 void qemu_set_cloexec(int fd);
+
+/*
+ * Clear FD_CLOEXEC for a descriptor.
+ *
+ * The caller must guarantee that no other fork+exec's occur before the
+ * exec that is intended to inherit this descriptor, eg by suspending CPUs
+ * and blocking monitor commands.
+ */
+void qemu_clear_cloexec(int fd);
 
 /* Starting on QEMU 2.5, qemu_hw_version() returns "2.5+" by default
  * instead of QEMU_VERSION, so setting hw_version on MachineClass

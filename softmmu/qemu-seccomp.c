@@ -196,6 +196,26 @@ static int seccomp_start(uint32_t seccomp_opts, Error **errp)
     return rc < 0 ? -1 : 0;
 }
 
+int cpr_exec_unset_spawn(void *opaque, QemuOpts *opts, Error **errp)
+{
+    const char *value = NULL;
+    char *retstr = NULL;
+
+    if (qemu_opt_get_bool(opts, "enable", false)) {
+        value = qemu_opt_get(opts, "spawn");
+        if (value) {
+            /* CPR_EXEC mode need call fork+execv, so do not deny spawn */
+            if (g_str_equal(value, "deny")) {
+                retstr = qemu_opt_get_del(opts, "spawn");
+            }
+            if (retstr)
+                g_free(retstr);
+        }
+    }
+
+    return 0;
+}
+
 int parse_sandbox(void *opaque, QemuOpts *opts, Error **errp)
 {
     if (qemu_opt_get_bool(opts, "enable", false)) {

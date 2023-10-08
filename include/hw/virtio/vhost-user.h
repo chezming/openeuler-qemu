@@ -10,6 +10,7 @@
 
 #include "chardev/char-fe.h"
 #include "hw/virtio/virtio.h"
+#include "hw/virtio/vhost.h"
 
 typedef struct VhostUserHostNotifier {
     struct rcu_head rcu;
@@ -26,5 +27,8 @@ typedef struct VhostUserState {
 
 bool vhost_user_init(VhostUserState *user, CharBackend *chr, Error **errp);
 void vhost_user_cleanup(VhostUserState *user);
+
+char *vhost_user_get_dev_name(void *opaque);
+CharBackend *vhost_user_get_charbackend(struct vhost_dev *dev);
 
 #endif

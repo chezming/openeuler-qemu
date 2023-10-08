@@ -23,6 +23,8 @@
 #include "io/dns-resolver.h"
 #include "qapi/error.h"
 #include "qemu/module.h"
+#include "migration/cpr-state.h"
+#include "migration/misc.h"
 
 QIONetListener *qio_net_listener_new(void)
 {
@@ -209,7 +211,8 @@ static gboolean qio_net_listener_wait_client_func(QIOChannel *ioc,
     return TRUE;
 }
 
-QIOChannelSocket *qio_net_listener_wait_client(QIONetListener *listener)
+QIOChannelSocket *qio_net_listener_wait_client(QIONetListener *listener,
+                                               char *name)
 {
     GMainContext *ctxt = g_main_context_new();
     GMainLoop *loop = g_main_loop_new(ctxt, TRUE);
@@ -219,6 +222,13 @@ QIOChannelSocket *qio_net_listener_wait_client(QIONetListener *listener)
         .loop = loop
     };
     size_t i;
+    int fd = -1;
+
+    if (name && listener->nsioc &&
+        migrate_mode() == MIG_MODE_CPR_EXEC) {
+        fd = cpr_find_fd(name, 0);
+        assert(fd >= 0);
+    }
 
     for (i = 0; i < listener->nsioc; i++) {
         if (listener->io_source[i]) {
@@ -240,7 +250,11 @@ QIOChannelSocket *qio_net_listener_wait_client(QIONetListener *listener)
         g_source_attach(sources[i], ctxt);
     }
 
-    g_main_loop_run(loop);
+    if (fd < 0) {
+        g_main_loop_run(loop);
+        if (data.sioc && data.sioc->fd >= 0)
+            cpr_resave_fd(name, 0, data.sioc->fd);
+    }
 
     for (i = 0; i < listener->nsioc; i++) {
         g_source_unref(sources[i]);

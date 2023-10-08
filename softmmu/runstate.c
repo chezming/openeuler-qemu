@@ -33,11 +33,14 @@
 #include "exec/exec-all.h"
 #include "exec/gdbstub.h"
 #include "hw/boards.h"
+#include "migration/cpr.h"
 #include "migration/misc.h"
 #include "migration/postcopy-ram.h"
+#include "migration/migration.h"
 #include "monitor/monitor.h"
 #include "net/net.h"
 #include "net/vhost_net.h"
+#include "qapi/util.h"
 #include "qapi/error.h"
 #include "qapi/qapi-commands-run-state.h"
 #include "qapi/qapi-events-run-state.h"
@@ -152,6 +155,7 @@ static const RunStateTransition runstate_transitions_def[] = {
     { RUN_STATE_RUNNING, RUN_STATE_SUSPENDED },
     { RUN_STATE_SUSPENDED, RUN_STATE_RUNNING },
     { RUN_STATE_SUSPENDED, RUN_STATE_FINISH_MIGRATE },
+    { RUN_STATE_SUSPENDED, RUN_STATE_PAUSED },
     { RUN_STATE_SUSPENDED, RUN_STATE_PRELAUNCH },
     { RUN_STATE_SUSPENDED, RUN_STATE_COLO},
 
@@ -220,6 +224,11 @@ void runstate_set(RunState new_state)
     current_run_state = new_state;
 }
 
+RunState runstate_get(void)
+{
+    return current_run_state;
+}
+
 bool runstate_is_running(void)
 {
     return runstate_check(RUN_STATE_RUNNING);
@@ -262,6 +271,43 @@ void qemu_system_vmstop_request(RunState state)
     qemu_mutex_unlock(&vmstop_lock);
     qemu_notify_event();
 }
+
+struct CprExecCompleteEntry {
+    CprExecCompleteHandler *cb;
+    void *opaque;
+    QTAILQ_ENTRY(CprExecCompleteEntry) entries;
+};
+
+static QTAILQ_HEAD(, CprExecCompleteEntry) cpr_exec_complete_head =
+    QTAILQ_HEAD_INITIALIZER(cpr_exec_complete_head);
+
+/*
+ * qemu_add_cpr_exec_complete_handler:
+ * @cb: the callback to invoke
+ * @opaque: user data passed to the callback
+ */
+CprExecCompleteEntry *qemu_add_cpr_exec_complete_handler(
+                CprExecCompleteHandler *cb, void *opaque)
+{
+    CprExecCompleteEntry *e;
+
+    e = g_malloc0(sizeof(*e));
+    e->cb = cb;
+    e->opaque = opaque;
+    QTAILQ_INSERT_TAIL(&cpr_exec_complete_head, e, entries);
+
+    return e;
+}
+
+void cpr_exec_complete_notify(void)
+{
+    CprExecCompleteEntry *e;
+
+    QTAILQ_FOREACH(e, &cpr_exec_complete_head, entries) {
+        e->cb(e->opaque);
+    }
+}
+
 struct VMChangeStateEntry {
     VMChangeStateHandler *cb;
     void *opaque;
@@ -336,6 +382,7 @@ void vm_state_notify(bool running, RunState state)
     }
 }
 
+static bool start_on_wakeup_requested;
 static ShutdownCause reset_requested;
 static ShutdownCause shutdown_requested;
 static int shutdown_signal;
@@ -353,6 +400,7 @@ static NotifierList wakeup_notifiers =
 static NotifierList shutdown_notifiers =
     NOTIFIER_LIST_INITIALIZER(shutdown_notifiers);
 static uint32_t wakeup_reason_mask = ~(1 << QEMU_WAKEUP_REASON_NONE);
+GStrv exec_argv;
 
 ShutdownCause qemu_shutdown_requested_get(void)
 {
@@ -367,6 +415,11 @@ ShutdownCause qemu_reset_requested_get(void)
 static int qemu_shutdown_requested(void)
 {
     return qatomic_xchg(&shutdown_requested, SHUTDOWN_CAUSE_NONE);
+}
+
+static int qemu_exec_requested(void)
+{
+    return exec_argv != NULL;
 }
 
 static void qemu_kill_report(void)
@@ -564,6 +617,11 @@ void qemu_register_suspend_notifier(Notifier *notifier)
     notifier_list_add(&suspend_notifiers, notifier);
 }
 
+void qemu_system_start_on_wakeup_request(void)
+{
+    start_on_wakeup_requested = true;
+}
+
 void qemu_system_wakeup_request(WakeupReason reason, Error **errp)
 {
     trace_system_wakeup_request(reason);
@@ -576,7 +634,13 @@ void qemu_system_wakeup_request(WakeupReason reason, Error **errp)
     if (!(wakeup_reason_mask & (1 << reason))) {
         return;
     }
-    runstate_set(RUN_STATE_RUNNING);
+    if (start_on_wakeup_requested) {
+        start_on_wakeup_requested = false;
+        vm_start();
+    } else {
+        runstate_set(RUN_STATE_RUNNING);
+    }
+
     wakeup_reason = reason;
     qemu_notify_event();
 }
@@ -628,6 +692,24 @@ void qemu_system_shutdown_request(ShutdownCause reason)
     qemu_notify_event();
 }
 
+void qemu_system_exec_argv_init(const strList *args)
+{
+    exec_argv = strv_from_strList(args);
+}
+
+void qemu_system_exec_request(void)
+{
+    MigrationState *s = migrate_get_current();
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        if (migration_has_finished(s)) {
+            shutdown_requested = 1;
+            qemu_notify_event();
+        } else {
+            s->parameters.mode = MIG_MODE_NORMAL;
+        }
+    }
+}
+
 static void qemu_system_powerdown(void)
 {
     qapi_event_send_powerdown();
@@ -676,6 +758,45 @@ static bool main_loop_should_exit(void)
     }
     request = qemu_shutdown_requested();
     if (request) {
+        if (qemu_exec_requested()) {
+            Error *err = NULL;
+            int ret;
+            long data = 1;
+            /* tell new qemu vm state file is ready */
+            do {
+                ret = write(eventnotifier_ptoc[1], &data, sizeof(data));
+            } while (ret < 0 && errno == EINTR);
+            if (ret <= 0) {
+                error_report("write ptoc eventnotifier failed");
+                MigrationState *s = migrate_get_current();
+                bdrv_invalidate_cache_all(&err);
+                exec_argv = NULL;
+                if (vm_run_state == RUN_STATE_RUNNING) {
+                    vm_start();
+                } else {
+                    runstate_set(vm_run_state);
+                }
+                s->parameters.mode = MIG_MODE_NORMAL;
+                return false;
+            }
+            do {
+                ret = read(eventnotifier_ctop[0], &data, sizeof(data));
+            } while (ret < 0 && errno == EINTR);
+            if (ret <= 0) {
+                error_report("read ctop eventnotifier failed");
+                MigrationState *s = migrate_get_current();
+                bdrv_invalidate_cache_all(&err);
+                exec_argv = NULL;
+                if (vm_run_state == RUN_STATE_RUNNING) {
+                    vm_start();
+                } else {
+                    runstate_set(vm_run_state);
+                }
+                s->parameters.mode = MIG_MODE_NORMAL;
+                return false;
+            }
+            exit(0);
+        }
         qemu_kill_report();
         qemu_system_shutdown(request);
         if (shutdown_action == SHUTDOWN_ACTION_PAUSE) {

@@ -21,6 +21,7 @@
 #define QEMU_SECCOMP_SET_SPAWN       (1 << 3)
 #define QEMU_SECCOMP_SET_RESOURCECTL (1 << 4)
 
+int cpr_exec_unset_spawn(void *opaque, QemuOpts *opts, Error **errp);
 int parse_sandbox(void *opaque, QemuOpts *opts, Error **errp);
 
 #endif

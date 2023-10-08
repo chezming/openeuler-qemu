@@ -425,12 +425,21 @@ fail_irqfd:
 
 static void vfio_platform_compute_needs_reset(VFIODevice *vbasedev)
 {
-    vbasedev->needs_reset = true;
+    if (vbasedev->reused) {
+        vbasedev->needs_reset = false;
+    } else {
+        vbasedev->needs_reset = true;
+    }
 }
 
 /* not implemented yet */
 static int vfio_platform_hot_reset_multi(VFIODevice *vbasedev)
 {
+    /*
+     * Althrough platform hot reset handler not implemented,
+     * also put assert here to get attention.
+     */
+    assert(!vbasedev->reused);
     return -1;
 }
 

@@ -26,6 +26,8 @@
 #include "hw/sysbus.h"
 #include "hw/virtio/virtio.h"
 #include "migration/qemu-file-types.h"
+#include "migration/cpr-state.h"
+#include "migration/misc.h"
 #include "qemu/host-utils.h"
 #include "qemu/module.h"
 #include "sysemu/kvm.h"
@@ -654,18 +656,52 @@ static int virtio_mmio_set_guest_notifier(DeviceState *d, int n, bool assign,
     VirtIODevice *vdev = virtio_bus_get_device(&proxy->bus);
     VirtioDeviceClass *vdc = VIRTIO_DEVICE_GET_CLASS(vdev);
     VirtQueue *vq = virtio_get_queue(vdev, n);
+    char *namer, *namew;
+    int r, fdr, fdw;
     EventNotifier *notifier = virtio_queue_get_guest_notifier(vq);
 
+    namew = g_strdup_printf("%s_VirtQueue_guest_notifier_%d_w",
+                            d->id ? d->id : d->canonical_path, n);
+    namer = g_strdup_printf("%s_VirtQueue_guest_notifier_%d_r",
+                            d->id ? d->id : d->canonical_path, n);
     if (assign) {
-        int r = event_notifier_init(notifier, 0);
-        if (r < 0) {
-            return r;
+        if (vdev->vhost_user_dev) {
+            fdr = cpr_find_fd(namer, 0);
+            fdw = cpr_find_fd(namew, 0);
+            if (fdr < 0  || fdw < 0) {
+                r = event_notifier_init(notifier, 0);
+                if (r < 0) {
+                    g_free(namer);
+                    g_free(namew);
+                    return r;
+                } else {
+                    cpr_resave_fd(namer, 0, notifier->rfd);
+                    cpr_resave_fd(namew, 0, notifier->wfd);
+                }
+            } else {
+                notifier->rfd = fdr;
+                notifier->wfd = fdw;
+                notifier->initialized = true;
+            }
+        } else {
+            r = event_notifier_init(notifier, 0);
+            if (r < 0) {
+                g_free(namer);
+                g_free(namew);
+                return r;
+            }
         }
         virtio_queue_set_guest_notifier_fd_handler(vq, true, with_irqfd);
     } else {
         virtio_queue_set_guest_notifier_fd_handler(vq, false, with_irqfd);
-        event_notifier_cleanup(notifier);
+        if (!vdev->vhost_user_dev || migrate_mode() != MIG_MODE_CPR_EXEC) {
+            event_notifier_cleanup(notifier);
+            cpr_delete_fd(namer, 0);
+            cpr_delete_fd(namew, 0);
+        }
     }
+    g_free(namer);
+    g_free(namew);
 
     if (vdc->guest_notifier_mask && vdev->use_guest_notifier_mask) {
         vdc->guest_notifier_mask(vdev, n, !assign);

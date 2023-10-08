@@ -38,6 +38,7 @@
 #endif
 
 #include "chardev/char-serial.h"
+#include "migration/cpr-state.h"
 
 #ifdef _WIN32
 
@@ -266,14 +267,22 @@ static void qmp_chardev_open_serial(Chardev *chr,
     ChardevHostdev *serial = backend->u.serial.data;
     int fd;
 
+    fd = cpr_find_fd(chr->label, 0);
+    if (fd >= 0) {
+        goto have_fd;
+    }
     fd = qmp_chardev_open_file_source(serial->device, O_RDWR | O_NONBLOCK,
                                       errp);
     if (fd < 0) {
         return;
+    } else {
+        cpr_save_fd(chr->label, 0, fd);
     }
     qemu_set_nonblock(fd);
     tty_serial_init(fd, 115200, 'N', 8, 1);
 
+have_fd:
+    qemu_chr_set_feature(chr, QEMU_CHAR_FEATURE_CPR);
     qemu_chr_open_fd(chr, fd, fd);
 }
 #endif /* __linux__ || __sun__ */

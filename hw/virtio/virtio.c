@@ -21,6 +21,7 @@
 #include "qemu/module.h"
 #include "hw/virtio/virtio.h"
 #include "migration/qemu-file-types.h"
+#include "migration/misc.h"
 #include "qemu/atomic.h"
 #include "hw/virtio/virtio-bus.h"
 #include "hw/qdev-properties.h"
@@ -3203,7 +3204,8 @@ int virtio_load(VirtIODevice *vdev, QEMUFile *f, int version_id)
             nheads = vring_avail_idx(&vdev->vq[i]) - vdev->vq[i].last_avail_idx;
             /* Check it isn't doing strange things with descriptor numbers. */
             if (nheads > vdev->vq[i].vring.num) {
-                virtio_error(vdev, "VQ %d size 0x%x Guest index 0x%x "
+                if (migrate_mode() != MIG_MODE_CPR_EXEC)
+                    virtio_error(vdev, "VQ %d size 0x%x Guest index 0x%x "
                              "inconsistent with Host index 0x%x: delta 0x%x",
                              i, vdev->vq[i].vring.num,
                              vring_avail_idx(&vdev->vq[i]),
@@ -3225,12 +3227,14 @@ int virtio_load(VirtIODevice *vdev, QEMUFile *f, int version_id)
             vdev->vq[i].inuse = (uint16_t)(vdev->vq[i].last_avail_idx -
                                 vdev->vq[i].used_idx);
             if (vdev->vq[i].inuse > vdev->vq[i].vring.num) {
-                error_report("VQ %d size 0x%x < last_avail_idx 0x%x - "
+                if (migrate_mode() != MIG_MODE_CPR_EXEC) {
+                    error_report("VQ %d size 0x%x < last_avail_idx 0x%x - "
                              "used_idx 0x%x",
                              i, vdev->vq[i].vring.num,
                              vdev->vq[i].last_avail_idx,
                              vdev->vq[i].used_idx);
-                return -1;
+                    return -1;
+                }
             }
         }
     }

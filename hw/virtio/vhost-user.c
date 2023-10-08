@@ -25,6 +25,8 @@
 #include "migration/migration.h"
 #include "migration/postcopy-ram.h"
 #include "migration/register.h"
+#include "migration/misc.h"
+#include "migration/cpr-state.h"
 #include "trace.h"
 #include "exec/ramblock.h"
 
@@ -1082,6 +1084,9 @@ static int vhost_user_set_mem_table(struct vhost_dev *dev,
             return -1;
         }
     } else {
+        if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+            return 0;
+        }
         if (vhost_user_fill_set_mem_table_msg(u, dev, &msg, fds, &fd_num,
                                               false) < 0) {
             return -1;
@@ -1143,6 +1148,9 @@ static int vhost_set_vring(struct vhost_dev *dev,
 static int vhost_user_set_vring_num(struct vhost_dev *dev,
                                     struct vhost_vring_state *ring)
 {
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        return 0;
+    }
     return vhost_set_vring(dev, VHOST_USER_SET_VRING_NUM, ring);
 }
 
@@ -1172,6 +1180,9 @@ static void vhost_user_host_notifier_remove(VhostUserState *user,
 static int vhost_user_set_vring_base(struct vhost_dev *dev,
                                      struct vhost_vring_state *ring)
 {
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        return 0;
+    }
     return vhost_set_vring(dev, VHOST_USER_SET_VRING_BASE, ring);
 }
 
@@ -1181,6 +1192,10 @@ static int vhost_user_set_vring_enable(struct vhost_dev *dev, int enable)
 
     if (!virtio_has_feature(dev->features, VHOST_USER_F_PROTOCOL_FEATURES)) {
         return -1;
+    }
+
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        return 0;
     }
 
     for (i = 0; i < dev->nvqs; ++i) {
@@ -1205,6 +1220,10 @@ static int vhost_user_get_vring_base(struct vhost_dev *dev,
         .hdr.size = sizeof(msg.payload.state),
     };
     struct vhost_user *u = dev->opaque;
+
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        return 0;
+    }
 
     vhost_user_host_notifier_remove(u->user, dev->vdev, ring->index);
 
@@ -1261,12 +1280,18 @@ static int vhost_set_vring_file(struct vhost_dev *dev,
 static int vhost_user_set_vring_kick(struct vhost_dev *dev,
                                      struct vhost_vring_file *file)
 {
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        return 0;
+    }
     return vhost_set_vring_file(dev, VHOST_USER_SET_VRING_KICK, file);
 }
 
 static int vhost_user_set_vring_call(struct vhost_dev *dev,
                                      struct vhost_vring_file *file)
 {
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        return 0;
+    }
     return vhost_set_vring_file(dev, VHOST_USER_SET_VRING_CALL, file);
 }
 
@@ -1343,6 +1368,10 @@ static int vhost_user_set_vring_addr(struct vhost_dev *dev,
         .hdr.size = sizeof(msg.payload.addr),
     };
 
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        return 0;
+    }
+
     bool reply_supported = virtio_has_feature(dev->protocol_features,
                                               VHOST_USER_PROTOCOL_F_REPLY_ACK);
 
@@ -1405,6 +1434,9 @@ static int vhost_user_set_features(struct vhost_dev *dev,
      */
     bool log_enabled = features & (0x1ULL << VHOST_F_LOG_ALL);
 
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        return 0;
+    }
     return vhost_user_set_u64(dev, VHOST_USER_SET_FEATURES, features,
                               log_enabled);
 }
@@ -1412,6 +1444,9 @@ static int vhost_user_set_features(struct vhost_dev *dev,
 static int vhost_user_set_protocol_features(struct vhost_dev *dev,
                                             uint64_t features)
 {
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        return 0;
+    }
     return vhost_user_set_u64(dev, VHOST_USER_SET_PROTOCOL_FEATURES, features,
                               false);
 }
@@ -1422,6 +1457,10 @@ static int vhost_user_set_owner(struct vhost_dev *dev)
         .hdr.request = VHOST_USER_SET_OWNER,
         .hdr.flags = VHOST_USER_VERSION,
     };
+
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        return 0;
+    }
 
     if (vhost_user_write(dev, &msg, NULL, 0) < 0) {
         return -EPROTO;
@@ -1643,11 +1682,14 @@ fdcleanup:
 
 static int vhost_setup_slave_channel(struct vhost_dev *dev)
 {
+    char *svname0;
+    int fd0;
     VhostUserMsg msg = {
         .hdr.request = VHOST_USER_SET_SLAVE_REQ_FD,
         .hdr.flags = VHOST_USER_VERSION,
     };
     struct vhost_user *u = dev->opaque;
+    Chardev *chr = u->user->chr->chr;
     int sv[2], ret = 0;
     bool reply_supported = virtio_has_feature(dev->protocol_features,
                                               VHOST_USER_PROTOCOL_F_REPLY_ACK);
@@ -1659,10 +1701,20 @@ static int vhost_setup_slave_channel(struct vhost_dev *dev)
         return 0;
     }
 
-    if (socketpair(PF_UNIX, SOCK_STREAM, 0, sv) == -1) {
-        error_report("socketpair() failed");
-        return -1;
+    svname0 = g_strdup_printf("%s_sv0", chr->label);
+    fd0 = cpr_find_fd(svname0, 0);
+    if (fd0 < 0) {
+        if (socketpair(PF_UNIX, SOCK_STREAM, 0, sv) == -1) {
+            error_report("socketpair() failed");
+            g_free(svname0);
+            return -1;
+        } else {
+            cpr_resave_fd(svname0, 0, sv[0]);
+        }
+    } else {
+        sv[0] = fd0;
     }
+    g_free(svname0);
 
     ioc = QIO_CHANNEL(qio_channel_socket_new_fd(sv[0], &local_err));
     if (!ioc) {
@@ -1674,6 +1726,10 @@ static int vhost_setup_slave_channel(struct vhost_dev *dev)
 
     if (reply_supported) {
         msg.hdr.flags |= VHOST_USER_NEED_REPLY_MASK;
+    }
+
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        return ret;
     }
 
     ret = vhost_user_write(dev, &msg, &sv[1], 1);
@@ -2395,12 +2451,19 @@ static bool vhost_user_mem_section_filter(struct vhost_dev *dev,
     return result;
 }
 
+CharBackend *vhost_user_get_charbackend(struct vhost_dev *dev)
+{
+    struct vhost_user *u = dev->opaque;
+    return u->user->chr;
+}
+
 static int vhost_user_get_inflight_fd(struct vhost_dev *dev,
                                       uint16_t queue_size,
                                       struct vhost_inflight *inflight)
 {
     void *addr;
     int fd;
+    char *name_f, *name_s, *name_o;
     struct vhost_user *u = dev->opaque;
     CharBackend *chr = u->user->chr;
     VhostUserMsg msg = {
@@ -2414,6 +2477,26 @@ static int vhost_user_get_inflight_fd(struct vhost_dev *dev,
     if (!virtio_has_feature(dev->protocol_features,
                             VHOST_USER_PROTOCOL_F_INFLIGHT_SHMFD)) {
         return 0;
+    }
+
+    name_f = g_strdup_printf("%s-inflight", chr->chr->label);
+    name_s = g_strdup_printf("%s-inflight-size", chr->chr->label);
+    name_o = g_strdup_printf("%s-inflight-offset", chr->chr->label);
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        fd = cpr_find_fd(name_f, 0);
+        if (fd >= 0) {
+            inflight->fd = fd;
+            inflight->size = cpr_find_fd(name_s, SPECIAL_ID);
+            inflight->offset = cpr_find_fd(name_o, SPECIAL_ID);
+            addr = mmap(0, inflight->size, PROT_READ | PROT_WRITE,
+                        MAP_SHARED, fd, inflight->offset);
+            inflight->addr = addr;
+            inflight->queue_size = queue_size;
+            g_free(name_f);
+            g_free(name_s);
+            g_free(name_o);
+            return 0;
+        }
     }
 
     if (vhost_user_write(dev, &msg, NULL, 0) < 0) {
@@ -2460,6 +2543,12 @@ static int vhost_user_get_inflight_fd(struct vhost_dev *dev,
     inflight->size = msg.payload.inflight.mmap_size;
     inflight->offset = msg.payload.inflight.mmap_offset;
     inflight->queue_size = queue_size;
+    cpr_resave_fd(name_f, 0, fd);
+    cpr_resave_fd(name_s, SPECIAL_ID, inflight->size);
+    cpr_resave_fd(name_o, SPECIAL_ID, inflight->offset);
+    g_free(name_f);
+    g_free(name_s);
+    g_free(name_o);
 
     return 0;
 }
@@ -2482,6 +2571,10 @@ static int vhost_user_set_inflight_fd(struct vhost_dev *dev,
         return 0;
     }
 
+    if (migrate_mode() == MIG_MODE_CPR_EXEC) {
+        return 0;
+    }
+
     if (vhost_user_write(dev, &msg, &inflight->fd, 1) < 0) {
         return -1;
     }
@@ -2498,6 +2591,12 @@ bool vhost_user_init(VhostUserState *user, CharBackend *chr, Error **errp)
     user->chr = chr;
     user->memory_slots = 0;
     return true;
+}
+
+char *vhost_user_get_dev_name(void *opaque)
+{
+    struct vhost_user *vu = opaque;
+    return vu->user->chr->chr->label;
 }
 
 void vhost_user_cleanup(VhostUserState *user)

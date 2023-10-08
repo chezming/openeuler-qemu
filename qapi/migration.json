@@ -542,6 +542,27 @@
             { 'name': 'zstd', 'if': 'CONFIG_ZSTD' } ] }
 
 ##
+# @MigMode:
+#
+# @normal: the original form of migration.
+#
+# @cpr-exec: The migrate command saves state to a file, directly exec's a
+#            new version of qemu on the same host, replacing the original
+#            process while retaining its PID, and loads the file via the
+#            migrate-incoming command.  The caller must specify a migration URI
+#            that writes to and reads from a file.  Guest RAM must be backed by
+#            a memory backend with share=on, and cannot be memory-backend-ram.
+#            Guest RAM is not copied, and storage blocks are not migrated, so
+#            all capabilities related to page and block copy must be disabled,
+#            and all related parameters are ignored.  Arguments for the new
+#            qemu process are taken from the @cpr-exec-args parameter.
+#
+# Since: 6.2
+##
+{ 'enum': 'MigMode',
+  'data': [ 'normal',  'cpr-exec' ] }
+
+##
 # @BitmapMigrationBitmapAliasTransform:
 #
 # @persistent: If present, the bitmap will be made persistent
@@ -615,6 +636,9 @@
 #
 # Migration parameters enumeration
 #
+# @mode: Migration mode. See description in @MigMode. Default is 'normal'.
+#        (Since 6.2)
+#
 # @announce-initial: Initial delay (in milliseconds) before sending the first
 #                    announce (Since 4.0)
 #
@@ -675,6 +699,12 @@
 #                         meanwhile the throttle increment won't be excessive
 #                         at tail stage.
 #                         The default value is false. (Since 5.1)
+#
+# @cpr-exec-args: arguments passed to new qemu for cpr-exec mode.  The first
+#                 argument should be the path of a new qemu binary, or a prefix
+#                 command that exec's the new qemu binary.  The arguments must
+#                 match those used to initially start qemu, plus the -incoming
+#                 option. (Since 6.2)
 #
 # @tls-creds: ID of the 'tls-creds' object that provides credentials for
 #             establishing a TLS connection over the migration data channel.
@@ -772,12 +802,14 @@
 # Since: 2.4
 ##
 { 'enum': 'MigrationParameter',
-  'data': ['announce-initial', 'announce-max',
+  'data': ['mode',
+           'announce-initial', 'announce-max',
            'announce-rounds', 'announce-step',
            'compress-level', 'compress-threads', 'decompress-threads',
            'compress-wait-thread', 'compress-method', 'throttle-trigger-threshold',
            'cpu-throttle-initial', 'cpu-throttle-increment',
            'cpu-throttle-tailslow',
+           'cpr-exec-args',
            'tls-creds', 'tls-hostname', 'tls-authz', 'max-bandwidth',
            'downtime-limit',
            { 'name': 'x-checkpoint-delay', 'features': [ 'unstable' ] },
@@ -790,6 +822,9 @@
 
 ##
 # @MigrateSetParameters:
+#
+# @mode: Migration mode. See description in @MigMode. Default is 'normal'.
+#        (Since 6.2)
 #
 # @announce-initial: Initial delay (in milliseconds) before sending the first
 #                    announce (Since 4.0)
@@ -843,6 +878,9 @@
 #                         meanwhile the throttle increment won't be excessive
 #                         at tail stage.
 #                         The default value is false. (Since 5.1)
+#
+# @cpr-exec-args: Arguments passed to new qemu for cpr-exec mode.
+#                 See description in @MigrationParameter. (Since 6.2)
 #
 # @tls-creds: ID of the 'tls-creds' object that provides credentials
 #             for establishing a TLS connection over the migration data
@@ -942,7 +980,8 @@
 # TODO either fuse back into MigrationParameters, or make
 # MigrationParameters members mandatory
 { 'struct': 'MigrateSetParameters',
-  'data': { '*announce-initial': 'size',
+  'data': { '*mode': 'MigMode',
+            '*announce-initial': 'size',
             '*announce-max': 'size',
             '*announce-rounds': 'size',
             '*announce-step': 'size',
@@ -955,6 +994,7 @@
             '*cpu-throttle-initial': 'uint8',
             '*cpu-throttle-increment': 'uint8',
             '*cpu-throttle-tailslow': 'bool',
+            '*cpr-exec-args': [ 'str' ],
             '*tls-creds': 'StrOrNull',
             '*tls-hostname': 'StrOrNull',
             '*tls-authz': 'StrOrNull',
@@ -992,6 +1032,9 @@
 # @MigrationParameters:
 #
 # The optional members aren't actually optional.
+#
+# @mode: Migration mode. See description in @MigMode. Default is 'normal'.
+#        (Since 6.2)
 #
 # @announce-initial: Initial delay (in milliseconds) before sending the
 #                    first announce (Since 4.0)
@@ -1045,6 +1088,9 @@
 #                         meanwhile the throttle increment won't be excessive
 #                         at tail stage.
 #                         The default value is false. (Since 5.1)
+#
+# @cpr-exec-args: Arguments passed to new qemu for cpr-exec mode.
+#                 See description in @MigrationParameter. (Since 6.2)
 #
 # @tls-creds: ID of the 'tls-creds' object that provides credentials
 #             for establishing a TLS connection over the migration data
@@ -1144,7 +1190,8 @@
 # Since: 2.4
 ##
 { 'struct': 'MigrationParameters',
-  'data': { '*announce-initial': 'size',
+  'data': { '*mode': 'MigMode',
+            '*announce-initial': 'size',
             '*announce-max': 'size',
             '*announce-rounds': 'size',
             '*announce-step': 'size',
@@ -1157,6 +1204,7 @@
             '*cpu-throttle-initial': 'uint8',
             '*cpu-throttle-increment': 'uint8',
             '*cpu-throttle-tailslow': 'bool',
+            '*cpr-exec-args': [ 'str' ],
             '*tls-creds': 'str',
             '*tls-hostname': 'str',
             '*tls-authz': 'str',

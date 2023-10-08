@@ -112,7 +112,8 @@ void vhost_scsi_common_stop(VHostSCSICommon *vsc)
     assert(ret >= 0);
 
     if (vsc->inflight) {
-        vhost_dev_free_inflight(vsc->inflight);
+        struct vhost_dev *dev = &vsc->dev;
+        vhost_dev_free_inflight(vsc->inflight, dev);
         vsc->inflight = NULL;
     }
 

@@ -293,7 +293,7 @@ int socket_set_fast_reuse(int fd)
 {
     int val = 1, ret;
 
-    ret = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR,
+    ret = setsockopt(fd, SOL_SOCKET, SO_REUSEPORT,
                      (const char *)&val, sizeof(val));
 
     assert(ret == 0);
@@ -307,6 +307,16 @@ void qemu_set_cloexec(int fd)
     f = fcntl(fd, F_GETFD);
     assert(f != -1);
     f = fcntl(fd, F_SETFD, f | FD_CLOEXEC);
+    assert(f != -1);
+}
+
+
+void qemu_clear_cloexec(int fd)
+{
+    int f;
+    f = fcntl(fd, F_GETFD);
+    assert(f != -1);
+    f = fcntl(fd, F_SETFD, f & ~FD_CLOEXEC);
     assert(f != -1);
 }
 

@@ -27,6 +27,9 @@
 #include "io/channel-socket.h"
 #include "io/channel-tls.h"
 #include "io/channel-websock.h"
+#include "migration/blocker.h"
+#include "migration/cpr-state.h"
+#include "migration/misc.h"
 #include "io/net-listener.h"
 #include "qemu/error-report.h"
 #include "qemu/module.h"
@@ -35,6 +38,7 @@
 #include "qapi/clone-visitor.h"
 #include "qapi/qapi-visit-sockets.h"
 #include "qemu/yank.h"
+#include "sysemu/sysemu.h"
 
 #include "chardev/char-io.h"
 #include "qom/object.h"
@@ -87,6 +91,7 @@ struct SocketChardev {
     bool connect_err_reported;
 
     QIOTask *connect_task;
+    Error *cpr_blocker;
 };
 typedef struct SocketChardev SocketChardev;
 
@@ -435,6 +440,11 @@ static void tcp_chr_free_connection(Chardev *chr)
 {
     SocketChardev *s = SOCKET_CHARDEV(chr);
     int i;
+
+    if (chr->cpr_enabled) {
+        cpr_delete_fd(chr->label, 0);
+    }
+    migrate_del_blocker(&s->cpr_blocker);
 
     if (s->read_msgfds_num) {
         for (i = 0; i < s->read_msgfds_num; i++) {
@@ -998,6 +1008,10 @@ static void tcp_chr_accept(QIONetListener *listener,
                                QIO_CHANNEL(cioc));
     }
     tcp_chr_new_client(chr, cioc);
+
+    if (s->sioc && chr->cpr_enabled) {
+        cpr_resave_fd(chr->label, 0, s->sioc->fd);
+    }
 }
 
 
@@ -1022,15 +1036,26 @@ static int tcp_chr_connect_client_sync(Chardev *chr, Error **errp)
     return 0;
 }
 
-
-static void tcp_chr_accept_server_sync(Chardev *chr)
+static void tcp_chr_accept_server_sync(Chardev *chr, Error **errp)
 {
     SocketChardev *s = SOCKET_CHARDEV(chr);
     QIOChannelSocket *sioc;
+    int fd;
     info_report("QEMU waiting for connection on: %s",
                 chr->filename);
     tcp_chr_change_state(s, TCP_CHARDEV_STATE_CONNECTING);
-    sioc = qio_net_listener_wait_client(s->listener);
+    if (migrate_mode() == MIG_MODE_CPR_EXEC &&
+        qemu_chr_has_feature(chr, QEMU_CHAR_FEATURE_CPR) &&
+        !chr->reopen_on_cpr) {
+        sioc = qio_net_listener_wait_client(s->listener, chr->label);
+        assert(sioc == NULL);
+        fd = cpr_find_fd(chr->label, 0);
+        assert(fd >= 0);
+        sioc = qio_channel_socket_new_fd(fd, errp);
+        assert(sioc != NULL);
+    } else {
+        sioc = qio_net_listener_wait_client(s->listener, chr->label);
+    }
     tcp_chr_set_client_ioc_name(chr, sioc);
     if (s->registered_yank) {
         yank_register_function(CHARDEV_YANK_INSTANCE(chr->label),
@@ -1110,7 +1135,7 @@ static int tcp_chr_wait_connected(Chardev *chr, Error **errp)
 
     while (s->state != TCP_CHARDEV_STATE_CONNECTED) {
         if (s->is_listen) {
-            tcp_chr_accept_server_sync(chr);
+            tcp_chr_accept_server_sync(chr, errp);
         } else {
             Error *err = NULL;
             if (tcp_chr_connect_client_sync(chr, &err) < 0) {
@@ -1254,6 +1279,27 @@ static gboolean socket_reconnect_timeout(gpointer opaque)
     return false;
 }
 
+static int load_char_socket_fd(Chardev *chr, Error **errp)
+{
+    ERRP_GUARD();
+    SocketChardev *sockchar = SOCKET_CHARDEV(chr);
+    QIOChannelSocket *sioc;
+    const char *label = chr->label;
+    int fd = cpr_find_fd(label, 0);
+
+    if (fd != -1) {
+        sockchar = SOCKET_CHARDEV(chr);
+        sioc = qio_channel_socket_new_fd(fd, errp);
+        if (sioc) {
+            tcp_chr_accept(sockchar->listener, sioc, chr);
+            object_unref(OBJECT(sioc));
+        } else {
+            error_prepend(errp, "could not restore socket for %s", label);
+            return -1;
+        }
+    }
+    return 0;
+}
 
 static int qmp_chardev_open_socket_server(Chardev *chr,
                                           bool is_telnet,
@@ -1282,7 +1328,7 @@ static int qmp_chardev_open_socket_server(Chardev *chr,
     update_disconnected_filename(s);
 
     if (is_waitconnect) {
-        tcp_chr_accept_server_sync(chr);
+        tcp_chr_accept_server_sync(chr, errp);
     } else {
         qio_net_listener_set_client_func_full(s->listener,
                                               tcp_chr_accept,
@@ -1458,6 +1504,18 @@ static void qmp_chardev_open_socket(Chardev *chr,
     }
     s->registered_yank = true;
 
+    if (!s->tls_creds && !s->is_websock) {
+        qemu_chr_set_feature(chr, QEMU_CHAR_FEATURE_CPR);
+    } else if (!chr->reopen_on_cpr) {
+        s->cpr_blocker = NULL;
+        error_setg(&s->cpr_blocker,
+                   "error: socket %s is not cpr capable due to %s option",
+                   chr->label, (s->tls_creds ? "TLS" : "websocket"));
+        if (migrate_add_blockers(&s->cpr_blocker, errp, MIG_MODE_CPR_EXEC,
+                                 -1)) {
+            return;
+        }
+    }
     /* be isn't opened until we get a connection */
     *be_opened = false;
 
@@ -1472,6 +1530,12 @@ static void qmp_chardev_open_socket(Chardev *chr,
         if (qmp_chardev_open_socket_client(chr, reconnect, errp) < 0) {
             return;
         }
+    }
+
+    if (migrate_mode() == MIG_MODE_CPR_EXEC &&
+        qemu_chr_has_feature(chr, QEMU_CHAR_FEATURE_CPR) &&
+        !chr->reopen_on_cpr && !is_waitconnect) {
+        load_char_socket_fd(chr, errp);
     }
 }
 

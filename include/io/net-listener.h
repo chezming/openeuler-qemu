@@ -159,7 +159,8 @@ void qio_net_listener_set_client_func(QIONetListener *listener,
  *
  * Returns: the new client socket
  */
-QIOChannelSocket *qio_net_listener_wait_client(QIONetListener *listener);
+QIOChannelSocket *qio_net_listener_wait_client(QIONetListener *listener,
+                                               char *name);
 
 
 /**

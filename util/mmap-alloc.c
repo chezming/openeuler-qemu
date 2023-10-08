@@ -170,13 +170,15 @@ static bool map_noreserve_effective(int fd, uint32_t qemu_map_flags)
     return false;
 }
 
+#define FIXED_ADDR  0x7a0000000000
 /*
  * Reserve a new memory region of the requested size to be used for mapping
  * from the given fd (if any).
  */
-static void *mmap_reserve(size_t size, int fd)
+static void *mmap_reserve(size_t size, int fd, uint32_t qemu_map_flags)
 {
     int flags = MAP_PRIVATE;
+    void *addr;
 
 #if defined(__powerpc64__) && defined(__linux__)
     /*
@@ -199,7 +201,16 @@ static void *mmap_reserve(size_t size, int fd)
     flags |= MAP_ANONYMOUS;
 #endif
 
-    return mmap(0, size, PROT_NONE, flags, fd, 0);
+    if (qemu_map_flags & QEMU_MAP_FIXED) {
+        flags |= MAP_FIXED;
+        addr = mmap((void *)FIXED_ADDR, size, PROT_NONE, flags, fd, 0);
+        if (addr == MAP_FAILED) {
+            error_report("Fixed address map failed");
+        }
+        return addr;
+    } else {
+        return mmap(0, size, PROT_NONE, flags, fd, 0);
+    }
 }
 
 /*
@@ -285,7 +296,7 @@ void *qemu_ram_mmap(int fd,
      */
     total = size + align;
 
-    guardptr = mmap_reserve(total, fd);
+    guardptr = mmap_reserve(total, fd, qemu_map_flags);
     if (guardptr == MAP_FAILED) {
         return MAP_FAILED;
     }

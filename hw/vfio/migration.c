@@ -759,6 +759,9 @@ static void vfio_migration_state_notifier(Notifier *notifier, void *data)
     VFIODevice *vbasedev = migration->vbasedev;
     int ret;
 
+    if (migrate_mode_of(s) != MIG_MODE_NORMAL) {
+        return;
+    }
     trace_vfio_migration_state_notifier(vbasedev->name,
                                         MigrationStatus_str(s->state));
 
@@ -840,8 +843,8 @@ static int vfio_migration_init(VFIODevice *vbasedev,
     migration->vm_state = qdev_add_vm_change_state_handler(vbasedev->dev,
                                                            vfio_vmstate_change,
                                                            vbasedev);
-    migration->migration_state.notify = vfio_migration_state_notifier;
-    add_migration_state_change_notifier(&migration->migration_state);
+    migration_add_notifier(&migration->migration_state,
+                           vfio_migration_state_notifier);
     return 0;
 
 err:
@@ -886,12 +889,8 @@ add_blocker:
                "VFIO device doesn't support migration");
     g_free(info);
 
-    ret = migrate_add_blocker(vbasedev->migration_blocker, errp);
-    if (ret < 0) {
-        error_free(vbasedev->migration_blocker);
-        vbasedev->migration_blocker = NULL;
-    }
-    return ret;
+    return migrate_add_blockers(&vbasedev->migration_blocker, errp,
+                                MIG_MODE_NORMAL, -1);
 }
 
 void vfio_migration_finalize(VFIODevice *vbasedev)
@@ -899,15 +898,11 @@ void vfio_migration_finalize(VFIODevice *vbasedev)
     if (vbasedev->migration) {
         VFIOMigration *migration = vbasedev->migration;
 
-        remove_migration_state_change_notifier(&migration->migration_state);
+        migration_remove_notifier(&migration->migration_state);
         qemu_del_vm_change_state_handler(migration->vm_state);
         unregister_savevm(VMSTATE_IF(vbasedev->dev), "vfio", vbasedev);
         vfio_migration_exit(vbasedev);
     }
 
-    if (vbasedev->migration_blocker) {
-        migrate_del_blocker(vbasedev->migration_blocker);
-        error_free(vbasedev->migration_blocker);
-        vbasedev->migration_blocker = NULL;
-    }
+    migrate_del_blocker(&vbasedev->migration_blocker);
 }

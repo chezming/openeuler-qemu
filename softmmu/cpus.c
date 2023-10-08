@@ -41,6 +41,7 @@
 #include "sysemu/replay.h"
 #include "sysemu/runstate.h"
 #include "sysemu/cpu-timers.h"
+#include "sysemu/sysemu.h"
 #include "sysemu/whpx.h"
 #include "hw/boards.h"
 #include "hw/hw.h"
@@ -689,6 +690,10 @@ int vm_prepare_start(void)
     cpu_enable_ticks();
     runstate_set(RUN_STATE_RUNNING);
     vm_state_notify(1, RUN_STATE_RUNNING);
+    if (cpr_exec_migrating) {
+        cpr_exec_migrating = false;
+        cpr_exec_complete_notify();
+    }
     return 0;
 }
 
