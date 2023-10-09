@@ -24,8 +24,7 @@ struct kvm_regs {
 			unsigned long r18;
 		} c3_regs;
 		struct {
-			unsigned long r[30];
-			unsigned long sp;
+			unsigned long r[31];
 			unsigned long fpcr;
 
 			unsigned long fp[124];
