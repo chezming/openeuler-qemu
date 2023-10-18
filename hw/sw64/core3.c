@@ -24,7 +24,6 @@
 #include "ui/console.h"
 #include "hw/sw64/core.h"
 #include "hw/sw64/sunway.h"
-#include "hw/boards.h"
 #include "sysemu/numa.h"
 
 #define MAX_CPUS_CORE3 64
@@ -38,6 +37,8 @@ static void core3_init(MachineState *machine)
     const char *initrd_filename = machine->initrd_filename;
     const char *hmcode_name = kvm_enabled() ? "core3-reset":"core3-hmcode";
     const char *bios_name = C3_UEFI_BIOS_NAME;
+    BOOT_PARAMS *sunway_boot_params = g_new0(BOOT_PARAMS, 1);
+    CORE3MachineState *c3ms = CORE3_MACHINE(machine);
     char *hmcode_filename;
     uint64_t hmcode_entry, kernel_entry;
 
@@ -71,8 +72,14 @@ static void core3_init(MachineState *machine)
         sw64_load_kernel(kernel_filename, &kernel_entry, kernel_cmdline);
 
     if (initrd_filename) {
-	sw64_load_initrd(initrd_filename);
+        sw64_load_initrd(initrd_filename, sunway_boot_params);
     }
+
+    if (sw64_load_dtb(machine, sunway_boot_params, c3ms->fdt_size) < 0) {
+        exit(1);
+    }
+
+    rom_add_blob_fixed("sunway_boot_params", (sunway_boot_params), 0x48, 0x90A100);
 }
 
 static void core3_machine_initfn(Object *obj)

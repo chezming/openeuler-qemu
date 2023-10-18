@@ -44,6 +44,7 @@ struct CORE3MachineState {
     char *oem_table_id;
     MemMapEntry *memmap;
     const int *irqmap;
+    int fdt_size;
 };
 
 #define TYPE_CORE3_MACHINE   MACHINE_TYPE_NAME("core3")

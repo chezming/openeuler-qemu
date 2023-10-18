@@ -22,9 +22,9 @@
 #include "hw/sw64/sunway.h"
 #include "hw/loader.h"
 #include "hw/nvram/fw_cfg.h"
-#include "hw/boards.h"
-#include "sysemu/kvm.h"
 #include "hw/firmware/smbios.h"
+#include "sysemu/device_tree.h"
+#include "qemu/datadir.h"
 
 #define CORE3_MAX_CPUS_MASK		0x3ff
 #define CORE3_CORES_SHIFT		10
@@ -177,6 +177,100 @@ static const MemoryRegionOps intpu_ops = {
         },
 };
 
+static void core3_create_fdt(CORE3MachineState *c3ms)
+{
+    uint32_t intc_phandle;
+    MachineState *ms = MACHINE(c3ms);
+
+    if (ms->dtb) {
+        char *filename;
+
+        filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, ms->dtb);
+        if (!filename) {
+            fprintf(stderr, "Couldn't open dtb file %s\n", ms->dtb);
+            exit(1);
+        }
+
+        ms->fdt = load_device_tree(ms->dtb, &c3ms->fdt_size);
+        if (!ms->fdt) {
+            error_report("load_device_tree() failed");
+            exit(1);
+        }
+    } else {
+        ms->fdt = create_device_tree(&c3ms->fdt_size);
+        if (!ms->fdt) {
+            error_report("create_device_tree() failed");
+            exit(1);
+        }
+
+        qemu_fdt_setprop_string(ms->fdt, "/", "compatible", "sunway,chip3");
+        qemu_fdt_setprop_string(ms->fdt, "/", "model", "chip3");
+        qemu_fdt_setprop_cell(ms->fdt, "/", "#address-cells", 0x2);
+        qemu_fdt_setprop_cell(ms->fdt, "/", "#size-cells", 0x2);
+
+        qemu_fdt_add_subnode(ms->fdt, "/soc");
+        qemu_fdt_setprop_string(ms->fdt, "/soc", "compatible", "simple-bus");
+        qemu_fdt_setprop_cell(ms->fdt, "/soc", "#address-cells", 0x2);
+        qemu_fdt_setprop_cell(ms->fdt, "/soc", "#size-cells", 0x2);
+        qemu_fdt_setprop(ms->fdt, "/soc", "ranges", NULL, 0);
+
+        intc_phandle = qemu_fdt_alloc_phandle(ms->fdt);
+        qemu_fdt_add_subnode(ms->fdt, "/soc/interrupt-controller");
+        qemu_fdt_setprop_string(ms->fdt, "/soc/interrupt-controller",
+                                "compatible", "sw64,sw6_irq_vt_controller");
+        qemu_fdt_setprop(ms->fdt, "/soc/interrupt-controller",
+                         "interrupt-controller", NULL, 0);
+        qemu_fdt_setprop_cell(ms->fdt, "/soc/interrupt-controller",
+                              "#interrupt-cells", 0x1);
+        qemu_fdt_setprop_cell(ms->fdt, "/soc/interrupt-controller",
+                              "phandle", intc_phandle);
+
+        qemu_fdt_add_subnode(ms->fdt, "/soc/serial0@8801");
+        qemu_fdt_setprop_cell(ms->fdt, "/soc/serial0@8801",
+                              "#address-cells", 0x2);
+        qemu_fdt_setprop_cell(ms->fdt, "/soc/serial0@8801",
+                              "#size-cells", 0x2);
+        qemu_fdt_setprop_string(ms->fdt, "/soc/serial0@8801",
+                                "compatible", "ns16550a");
+        qemu_fdt_setprop_sized_cells(ms->fdt, "/soc/serial0@8801",
+                                     "reg", 2, 0x8801000003f8, 2, 0x10);
+        qemu_fdt_setprop_cell(ms->fdt, "/soc/serial0@8801",
+                              "interrupt-parent", intc_phandle);
+        qemu_fdt_setprop_cell(ms->fdt, "/soc/serial0@8801", "interrupts", 12);
+        qemu_fdt_setprop_cell(ms->fdt, "/soc/serial0@8801", "reg-shift", 0x0);
+        qemu_fdt_setprop_cell(ms->fdt, "/soc/serial0@8801",
+                              "reg-io-width", 0x1);
+        qemu_fdt_setprop_cell(ms->fdt, "/soc/serial0@8801",
+                              "clock-frequency", 24000000);
+        qemu_fdt_setprop_string(ms->fdt, "/soc/serial0@8801",
+                                "status", "okay");
+
+        qemu_fdt_add_subnode(ms->fdt, "/soc/misc0@8036");
+        qemu_fdt_setprop_cell(ms->fdt, "/soc/misc0@8036",
+                              "#address-cells", 0x2);
+        qemu_fdt_setprop_cell(ms->fdt, "/soc/misc0@8036", "#size-cells", 0x2);
+        qemu_fdt_setprop_string(ms->fdt, "/soc/misc0@8036",
+                                "compatible", "sw6,sunway-ged");
+        qemu_fdt_setprop_sized_cells(ms->fdt, "/soc/misc0@8036",
+                                     "reg", 2, 0x803600000000, 2, 0x20);
+        qemu_fdt_setprop_cell(ms->fdt, "/soc/misc0@8036",
+                              "interrupt-parent", intc_phandle);
+        qemu_fdt_setprop_cell(ms->fdt, "/soc/misc0@8036", "interrupts", 13);
+        qemu_fdt_setprop_cell(ms->fdt, "/soc/misc0@8036", "reg-shift", 0x0);
+        qemu_fdt_setprop_cell(ms->fdt, "/soc/misc0@8036", "reg-io-width", 0x8);
+        qemu_fdt_setprop_cell(ms->fdt, "/soc/misc0@8036",
+                              "clock-frequency", 24000000);
+        qemu_fdt_setprop_string(ms->fdt, "/soc/misc0@8036", "status", "okay");
+
+        qemu_fdt_add_subnode(ms->fdt, "/soc/fw_cfg@8049");
+        qemu_fdt_setprop_string(ms->fdt, "/soc/fw_cfg@8049",
+                                "compatible", "qemu,fw-cfg-mmio");
+        qemu_fdt_setprop(ms->fdt, "/soc/fw_cfg@8049", "dma-coherent", NULL, 0);
+        qemu_fdt_setprop_sized_cells(ms->fdt, "/soc/fw_cfg@8049",
+                                     "reg", 2, SW_FW_CFG_P_BASE, 2, 0x18);
+    }
+}
+
 static void core3_cpus_init(MachineState *ms)
 {
     int i;
@@ -199,6 +293,9 @@ void core3_board_init(MachineState *ms)
     uint64_t MB = 1024 * 1024;
     uint64_t GB = 1024 * MB;
     PCIBus *b;
+
+    /* Create device tree */
+    core3_create_fdt(core3ms);
 
     core3_cpus_init(ms);
 

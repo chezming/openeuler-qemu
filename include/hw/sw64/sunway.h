@@ -23,7 +23,10 @@ void sw64_load_hmcode(const char *hmcode_filename, uint64_t *hmcode_entry);
 void sw64_find_and_load_bios(const char *bios_name);
 void sw64_load_kernel(const char *kernel_filename, uint64_t *kernel_entry,
                       const char *kernel_cmdline);
-void sw64_load_initrd(const char *initrd_filename);
+void sw64_load_initrd(const char *initrd_filename,
+                      BOOT_PARAMS *sunway_boot_params);
+int sw64_load_dtb(MachineState *ms,
+                      BOOT_PARAMS *sunway_boot_params, int fdt_size);
 void sw64_board_alarm_timer(void *opaque);
 void sw64_create_alarm_timer(MachineState *ms, BoardState *bs);
 uint64_t convert_bit(int n);

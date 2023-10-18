@@ -30,12 +30,13 @@
 #include "ui/console.h"
 #include "hw/sw64/core.h"
 #include "hw/sw64/sunway.h"
-#include "hw/boards.h"
 #include "sysemu/numa.h"
 #include "net/net.h"
+#include "sysemu/device_tree.h"
 
 #define MAX_SATA_PORTS 6
 #define SW_PIN_TO_IRQ 16
+#define SW_FDT_BASE 0x2d00000ULL
 
 static uint64_t rtc_read(void *opaque, hwaddr addr, unsigned size)
 {
@@ -308,10 +309,10 @@ void sw64_load_kernel(const char *kernel_filename, uint64_t *kernel_entry,
     return;
 }
 
-void sw64_load_initrd(const char *initrd_filename)
+void sw64_load_initrd(const char *initrd_filename,
+                      BOOT_PARAMS *sunway_boot_params)
 {
     long initrd_base, initrd_size;
-    BOOT_PARAMS *sunway_boot_params = g_new0(BOOT_PARAMS, 1);
 
     initrd_size = get_image_size(initrd_filename);
     if (initrd_size < 0) {
@@ -324,9 +325,28 @@ void sw64_load_initrd(const char *initrd_filename)
     load_image_targphys(initrd_filename, initrd_base, initrd_size);
     sunway_boot_params->initrd_start = initrd_base | 0xfff0000000000000UL;
     sunway_boot_params->initrd_size = initrd_size;
-    rom_add_blob_fixed("sunway_boot_params", (sunway_boot_params), 0x48, 0x90A100);
 
     return;
+}
+
+int sw64_load_dtb(MachineState *ms,
+                  BOOT_PARAMS *sunway_boot_params, int fdt_size)
+{
+    sunway_boot_params->dtb_start = SW_FDT_BASE | 0xfff0000000000000UL;
+
+    if (!ms->fdt) {
+        fprintf(stderr, "Board was unable to create a dtb blob\n");
+        return -1;
+    }
+
+    qemu_fdt_dumpdtb(ms->fdt, fdt_size);
+
+    /* Put the DTB into the memory map as a ROM image: this will ensure
+     * the DTB is copied again upon reset, even if addr points into RAM.
+     */
+    rom_add_blob_fixed("dtb", ms->fdt, fdt_size, SW_FDT_BASE);
+
+    return 0;
 }
 
 void sw64_board_alarm_timer(void *opaque)
