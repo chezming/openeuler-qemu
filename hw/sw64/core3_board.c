@@ -341,6 +341,7 @@ void core3_board_init(MachineState *ms)
                           "sw64-rtc", 0x08ULL);
     memory_region_add_subregion(get_system_memory(), 0x804910000000ULL,
                                 &bs->io_rtc);
+    object_property_add_tm(OBJECT(core3ms), "rtc-time", rtc_get_time);
 #ifdef CONFIG_SW64_VT_IOMMU
     sw64_vt_iommu_init(b);
 #endif

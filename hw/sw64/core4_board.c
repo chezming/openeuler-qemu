@@ -279,6 +279,7 @@ void core4_board_init(MachineState *ms)
 		          "sw64-rtc", 0x08ULL);
     memory_region_add_subregion(get_system_memory(), 0x804910000000ULL,
                                 &bs->io_rtc);
+    object_property_add_tm(OBJECT(core4ms), "rtc-time", rtc_get_time);
 
     sw64_create_pcie(bs, b, phb);
 

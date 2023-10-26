@@ -41,4 +41,5 @@ void sw64_create_pcie(BoardState *bs, PCIBus *b, PCIHostState *phb);
 PCIINTxRoute sw64_route_intx_pin_to_irq(void *opaque, int pin);
 MemTxResult msi_write(void *opaque, hwaddr addr, uint64_t value,
                       unsigned size, MemTxAttrs attrs);
+void rtc_get_time(Object *obj, struct tm *current_tm, Error **errp);
 #endif /* SW64_SUNWAY_H */

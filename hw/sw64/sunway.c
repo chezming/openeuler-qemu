@@ -517,3 +517,13 @@ void sw64_create_pcie(BoardState *bs, PCIBus *b, PCIHostState *phb)
 
     pci_create_simple(phb->bus, -1, "nec-usb-xhci");
 }
+
+void rtc_get_time(Object *obj, struct tm *current_tm, Error **errp)
+{
+    time_t guest_sec;
+    int64_t guest_nsec;
+
+    guest_nsec = get_clock_realtime();
+    guest_sec = guest_nsec / NANOSECONDS_PER_SECOND;
+    gmtime_r(&guest_sec, current_tm);
+}
