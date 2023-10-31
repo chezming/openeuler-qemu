@@ -33,6 +33,7 @@
 #include "sysemu/numa.h"
 #include "net/net.h"
 #include "sysemu/device_tree.h"
+#include <libfdt.h>
 
 #define MAX_SATA_PORTS 6
 #define SW_PIN_TO_IRQ 16
@@ -329,9 +330,9 @@ void sw64_load_initrd(const char *initrd_filename,
     return;
 }
 
-int sw64_load_dtb(MachineState *ms,
-                  BOOT_PARAMS *sunway_boot_params, int fdt_size)
+int sw64_load_dtb(MachineState *ms, BOOT_PARAMS *sunway_boot_params)
 {
+    int ret, fdt_size;
     sunway_boot_params->dtb_start = SW_FDT_BASE | 0xfff0000000000000UL;
 
     if (!ms->fdt) {
@@ -339,6 +340,10 @@ int sw64_load_dtb(MachineState *ms,
         return -1;
     }
 
+    ret = fdt_pack(ms->fdt);
+    /* Should only fail if we've built a corrupted tree */
+    g_assert(ret == 0);
+    fdt_size = fdt_totalsize(ms->fdt);
     qemu_fdt_dumpdtb(ms->fdt, fdt_size);
 
     /* Put the DTB into the memory map as a ROM image: this will ensure

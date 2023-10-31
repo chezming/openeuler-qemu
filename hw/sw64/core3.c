@@ -38,7 +38,6 @@ static void core3_init(MachineState *machine)
     const char *hmcode_name = kvm_enabled() ? "core3-reset":"core3-hmcode";
     const char *bios_name = C3_UEFI_BIOS_NAME;
     BOOT_PARAMS *sunway_boot_params = g_new0(BOOT_PARAMS, 1);
-    CORE3MachineState *c3ms = CORE3_MACHINE(machine);
     char *hmcode_filename;
     uint64_t hmcode_entry, kernel_entry;
 
@@ -75,7 +74,7 @@ static void core3_init(MachineState *machine)
         sw64_load_initrd(initrd_filename, sunway_boot_params);
     }
 
-    if (sw64_load_dtb(machine, sunway_boot_params, c3ms->fdt_size) < 0) {
+    if (sw64_load_dtb(machine, sunway_boot_params) < 0) {
         exit(1);
     }
 
