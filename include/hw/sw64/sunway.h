@@ -4,6 +4,8 @@
 #include "exec/cpu-defs.h"
 #include "hw/pci/pci.h"
 #include "hw/loader.h"
+#include "hw/sw64/core.h"
+
 extern const MemoryRegionOps rtc_ops;
 extern const MemoryRegionOps sw64_pci_ignore_ops;
 extern const MemoryRegionOps sw64_pci_config_ops;
@@ -38,4 +40,6 @@ void serial_set_irq(void *opaque, int irq, int level);
 void sw64_new_cpu(const char *name, int64_t arch_id, Error **errp);
 void sw64_create_pcie(BoardState *bs, PCIBus *b, PCIHostState *phb);
 PCIINTxRoute sw64_route_intx_pin_to_irq(void *opaque, int pin);
+MemTxResult msi_write(void *opaque, hwaddr addr, uint64_t value,
+                      unsigned size, MemTxAttrs attrs);
 #endif /* SW64_SUNWAY_H */

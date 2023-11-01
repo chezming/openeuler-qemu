@@ -136,9 +136,9 @@ static MemTxResult msi_read(void *opaque, hwaddr addr,
     return MEMTX_OK;
 }
 
-static MemTxResult msi_write(void *opaque, hwaddr addr,
-                             uint64_t value, unsigned size,
-                             MemTxAttrs attrs)
+MemTxResult msi_write(void *opaque, hwaddr addr,
+                      uint64_t value, unsigned size,
+                      MemTxAttrs attrs)
 {
     int ret = 0;
     MSIMessage msg = {};

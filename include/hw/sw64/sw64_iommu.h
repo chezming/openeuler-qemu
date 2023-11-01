@@ -100,6 +100,4 @@ extern void swvt_address_space_invalidate_iova(SW64IOMMUState *s, unsigned long 
 extern void swvt_address_space_unmap_iova(SW64IOMMUState *s, unsigned long val);
 extern void swvt_address_space_map_iova(SW64IOMMUState *s, unsigned long val);
 extern SWVTAddressSpace *iommu_find_add_as(SW64IOMMUState *s, PCIBus *bus, int devfn);
-extern MemTxResult msi_write(void *opaque, hwaddr addr, uint64_t value, unsigned size,
-                              MemTxAttrs attrs);
 #endif

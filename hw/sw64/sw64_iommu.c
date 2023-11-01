@@ -28,6 +28,7 @@
 #include "qemu/log.h"
 #include "qapi/error.h"
 #include "hw/sw64/sw64_iommu.h"
+#include "hw/sw64/sunway.h"
 #include "sysemu/kvm.h"
 
 #define IOMMU_PAGE_SHIFT		13
