@@ -42,7 +42,7 @@ struct CORE3MachineState {
     PCIBus *bus;
     char *oem_id;
     char *oem_table_id;
-    MemMapEntry *memmap;
+    const MemMapEntry *memmap;
     const int *irqmap;
     int fdt_size;
 };
@@ -61,7 +61,7 @@ struct CORE4MachineState {
     PCIBus *bus;
     char *oem_id;
     char *oem_table_id;
-    MemMapEntry *memmap;
+    const MemMapEntry *memmap;
     const int *irqmap;
 };
 

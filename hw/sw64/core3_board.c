@@ -289,7 +289,6 @@ void core3_board_init(MachineState *ms)
     DeviceState *dev = qdev_new(TYPE_CORE3_BOARD);
     BoardState *bs = CORE3_BOARD(dev);
     PCIHostState *phb = PCI_HOST_BRIDGE(dev);
-    MemMapEntry memmap[ARRAY_SIZE(base_memmap)];
     uint64_t MB = 1024 * 1024;
     uint64_t GB = 1024 * MB;
     PCIBus *b;
@@ -352,7 +351,7 @@ void core3_board_init(MachineState *ms)
     rom_set_fw(core3ms->fw_cfg);
 
     core3ms->bus = phb->bus;
-    core3ms->memmap = memmap;
+    core3ms->memmap = base_memmap;
     sw64_acpi_setup((SW64MachineState*)core3ms);
 
     core3_virt_build_smbios(core3ms);
