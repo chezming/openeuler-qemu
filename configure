@@ -357,6 +357,7 @@ debug_mutex="no"
 plugins="$default_feature"
 rng_none="no"
 secret_keyring="$default_feature"
+qat_migration_opt=""
 meson=""
 ninja=""
 gio="$default_feature"
@@ -1133,6 +1134,8 @@ for opt do
   --disable-vhost-kernel) vhost_kernel="no"
   ;;
   --enable-vhost-kernel) vhost_kernel="yes"
+  ;;
+  --enable-qat-migration) qat_migration_opt="yes"
   ;;
   --disable-capstone) capstone="disabled"
   ;;
@@ -3474,6 +3477,9 @@ fi
 if test "$vhost_kernel" = "yes" ; then
   echo "CONFIG_VHOST_KERNEL=y" >> $config_host_mak
 fi
+if test "$qat_migration_opt" = "yes" ; then
+  echo "CONFIG_QAT_MIGRATION=y" >> $config_host_mak
+fi
 if test "$vhost_user" = "yes" ; then
   echo "CONFIG_VHOST_USER=y" >> $config_host_mak
 fi
@@ -3626,7 +3632,10 @@ fi
 if test "$secret_keyring" = "yes" ; then
   echo "CONFIG_SECRET_KEYRING=y" >> $config_host_mak
 fi
-
+if test "$qat_migration_opt" = "yes" ; then
+glib_cflags="$glib_cflags -I/usr/include/quickassist -I/usr/include/quickassist/include -I/usr/include/quickassist/include/dc -I/usr/include/quickassist/utilities/osal/include -I/usr/include/quickassist/utilities/osal/src/linux/user_space/include -I/usr/include/quickassist/utilities/libusdm_drv/include -I/usr/include/quickassist/lookaside/access_layer/include/ -I/usr/include/quickassist/utilities/libusdm_drv/"
+glib_libs="$glib_libs -lqat_s -lusdm_drv_s "
+fi
 echo "ROMS=$roms" >> $config_host_mak
 echo "MAKE=$make" >> $config_host_mak
 echo "PYTHON=$python" >> $config_host_mak

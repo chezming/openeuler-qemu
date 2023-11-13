@@ -36,7 +36,16 @@
 extern MigrationStats ram_counters;
 extern XBZRLECacheStats xbzrle_counters;
 extern CompressionStats compression_counters;
+#ifdef CONFIG_QAT_MIGRATION
+#define RAM_SAVE_MAX_PAGE_NUM 256
+#define RAM_SAVE_MULTI_PAGE_NUM 63
 
+typedef struct MultiPageAddr {
+    unsigned long pages;
+    unsigned long last_idx;
+    unsigned long addr[RAM_SAVE_MAX_PAGE_NUM];
+} MultiPageAddr;
+#endif
 bool ramblock_is_ignored(RAMBlock *block);
 /* Should be holding either ram_list.mutex, or the RCU lock. */
 #define RAMBLOCK_FOREACH_NOT_IGNORED(block)            \
@@ -87,5 +96,15 @@ bool ram_write_tracking_compatible(void);
 void ram_write_tracking_prepare(void);
 int ram_write_tracking_start(void);
 void ram_write_tracking_stop(void);
-
+#ifdef CONFIG_QAT_MIGRATION
+void qat_zero_copy_cleanup(void);
+void save_compressed_page_header(RAMBlock *block,
+                                 MultiPageAddr *mpa,
+                                 uint64_t bytes,
+                                 uint32_t checksum);
+void save_compressed_data(void *data, uint32_t bytes);
+void save_uncompressed_page(RAMBlock *block, MultiPageAddr *mpa);
+unsigned long multi_page_addr_get_one(MultiPageAddr *mpa, unsigned long idx);
+int qat_save_zero_page(RAMBlock *block, MultiPageAddr *mpa);
+#endif
 #endif
