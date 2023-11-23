@@ -38,6 +38,7 @@
 #define MAX_SATA_PORTS 6
 #define SW_PIN_TO_IRQ 16
 #define SW_FDT_BASE 0x2d00000ULL
+#define SW_INITRD_BASE 0x3000000UL
 
 static uint64_t rtc_read(void *opaque, hwaddr addr, unsigned size)
 {
@@ -313,7 +314,7 @@ void sw64_load_kernel(const char *kernel_filename, uint64_t *kernel_entry,
 void sw64_load_initrd(const char *initrd_filename,
                       BOOT_PARAMS *sunway_boot_params)
 {
-    long initrd_base, initrd_size;
+    long initrd_size;
 
     initrd_size = get_image_size(initrd_filename);
     if (initrd_size < 0) {
@@ -321,10 +322,9 @@ void sw64_load_initrd(const char *initrd_filename,
 		     initrd_filename);
 	exit(1);
     }
-    // Put the initrd image as high in memory as possible.
-    initrd_base = 0x3000000UL;
-    load_image_targphys(initrd_filename, initrd_base, initrd_size);
-    sunway_boot_params->initrd_start = initrd_base | 0xfff0000000000000UL;
+    /* Put the initrd image as high in memory as possible. */
+    load_image_targphys(initrd_filename, SW_INITRD_BASE, initrd_size);
+    sunway_boot_params->initrd_start = SW_INITRD_BASE | 0xfff0000000000000UL;
     sunway_boot_params->initrd_size = initrd_size;
 
     return;
@@ -333,7 +333,20 @@ void sw64_load_initrd(const char *initrd_filename,
 int sw64_load_dtb(MachineState *ms, BOOT_PARAMS *sunway_boot_params)
 {
     int ret, fdt_size;
-    sunway_boot_params->dtb_start = SW_FDT_BASE | 0xfff0000000000000UL;
+    hwaddr fdt_base;
+
+    if (ms->kernel_filename) {
+        /* For direct kernel boot, place the DTB after the initrd to avoid
+	 * overlaying the loaded kernel.
+	 */
+        sunway_boot_params->dtb_start = (SW_INITRD_BASE | 0xfff0000000000000UL)
+		                        + sunway_boot_params->initrd_size;
+    } else {
+        /* For BIOS boot, place the DTB at SW_FDT_BASE temporarily, the
+	 * bootloader will move it to a more proper place later.
+	 */
+        sunway_boot_params->dtb_start = SW_FDT_BASE | 0xfff0000000000000UL;
+    }
 
     if (!ms->fdt) {
         fprintf(stderr, "Board was unable to create a dtb blob\n");
@@ -349,7 +362,8 @@ int sw64_load_dtb(MachineState *ms, BOOT_PARAMS *sunway_boot_params)
     /* Put the DTB into the memory map as a ROM image: this will ensure
      * the DTB is copied again upon reset, even if addr points into RAM.
      */
-    rom_add_blob_fixed("dtb", ms->fdt, fdt_size, SW_FDT_BASE);
+    fdt_base = sunway_boot_params->dtb_start & (~0xfff0000000000000UL);
+    rom_add_blob_fixed("dtb", ms->fdt, fdt_size, fdt_base);
 
     return 0;
 }
