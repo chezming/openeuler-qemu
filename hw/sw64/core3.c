@@ -67,11 +67,12 @@ static void core3_init(MachineState *machine)
 
     if (!kernel_filename)
 	sw64_find_and_load_bios(bios_name);
-    else
+    else {
         sw64_load_kernel(kernel_filename, &kernel_entry, kernel_cmdline);
 
-    if (initrd_filename) {
-        sw64_load_initrd(initrd_filename, sunway_boot_params);
+        if (initrd_filename) {
+            sw64_load_initrd(initrd_filename, sunway_boot_params);
+        }
     }
 
     if (sw64_load_dtb(machine, sunway_boot_params) < 0) {

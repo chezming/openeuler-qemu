@@ -65,11 +65,12 @@ static void core4_init(MachineState *machine)
 
     if (!kernel_filename)
         sw64_find_and_load_bios(bios_name);
-    else
-	sw64_load_kernel(kernel_filename, &kernel_entry, kernel_cmdline);
+    else {
+        sw64_load_kernel(kernel_filename, &kernel_entry, kernel_cmdline);
 
-    if (initrd_filename) {
-	sw64_load_initrd(initrd_filename, sunway_boot_params);
+        if (initrd_filename) {
+            sw64_load_initrd(initrd_filename, sunway_boot_params);
+        }
     }
 
     rom_add_blob_fixed("sunway_boot_params", (sunway_boot_params), 0x48, 0x90A100);
