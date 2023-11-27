@@ -852,6 +852,8 @@ MigrationParameters *qmp_query_migrate_parameters(Error **errp)
     params->compress_level = s->parameters.compress_level;
     params->has_compress_threads = true;
     params->compress_threads = s->parameters.compress_threads;
+    params->has_compress_with_qat = true;
+    params->compress_with_qat = s->parameters.compress_with_qat;
     params->has_compress_wait_thread = true;
     params->compress_wait_thread = s->parameters.compress_wait_thread;
     params->has_decompress_threads = true;
@@ -1516,6 +1518,10 @@ static void migrate_params_test_apply(MigrateSetParameters *params,
         dest->compress_wait_thread = params->compress_wait_thread;
     }
 
+    if (params->has_compress_with_qat) {
+        dest->compress_with_qat = params->compress_with_qat;
+    }
+
     if (params->has_decompress_threads) {
         dest->decompress_threads = params->decompress_threads;
     }
@@ -1615,6 +1621,10 @@ static void migrate_params_apply(MigrateSetParameters *params, Error **errp)
 
     if (params->has_compress_wait_thread) {
         s->parameters.compress_wait_thread = params->compress_wait_thread;
+    }
+
+    if (params->has_compress_with_qat) {
+        s->parameters.compress_with_qat = params->compress_with_qat;
     }
 
     if (params->has_decompress_threads) {
@@ -2477,6 +2487,17 @@ int migrate_compress_wait_thread(void)
     return s->parameters.compress_wait_thread;
 }
 
+#ifdef CONFIG_QAT_MIGRATION
+bool migrate_compress_with_qat(void)
+{
+    MigrationState *s;
+
+    s = migrate_get_current();
+
+    return s->parameters.compress_with_qat;
+}
+#endif
+
 int migrate_decompress_threads(void)
 {
     MigrationState *s;
@@ -3009,7 +3030,7 @@ static int postcopy_start(MigrationState *ms)
     if (ret < 0) {
         goto fail;
     }
-
+    
     ret = bdrv_inactivate_all();
     if (ret < 0) {
         goto fail;
@@ -3272,7 +3293,7 @@ static void migration_completion(MigrationState *s)
         migrate_set_state(&s->state, current_active_state,
                           MIGRATION_STATUS_COMPLETED);
     }
-
+    
     return;
 
 fail_invalidate:
@@ -3494,7 +3515,7 @@ static MigThrError migration_detect_error(MigrationState *s)
         assert(!local_error);
         return MIG_THR_ERR_NONE;
     }
-
+    
     if (local_error) {
         migrate_set_error(s, local_error);
         error_free(local_error);
@@ -4205,6 +4226,8 @@ static Property migration_properties[] = {
                       DEFAULT_MIGRATE_COMPRESS_THREAD_COUNT),
     DEFINE_PROP_BOOL("x-compress-wait-thread", MigrationState,
                       parameters.compress_wait_thread, true),
+    DEFINE_PROP_BOOL("x-compress-with-qat", MigrationState,
+                      parameters.compress_with_qat, false),
     DEFINE_PROP_UINT8("x-decompress-threads", MigrationState,
                       parameters.decompress_threads,
                       DEFAULT_MIGRATE_DECOMPRESS_THREAD_COUNT),
@@ -4326,6 +4349,7 @@ static void migration_instance_init(Object *obj)
     /* Set has_* up only for parameter checks */
     params->has_compress_level = true;
     params->has_compress_threads = true;
+    params->has_compress_with_qat = true;
     params->has_decompress_threads = true;
     params->has_compress_method = true;
     params->has_throttle_trigger_threshold = true;

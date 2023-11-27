@@ -55,7 +55,9 @@
 #include "qemu/iov.h"
 #include "multifd.h"
 #include "sysemu/runstate.h"
-
+#ifdef CONFIG_QAT_MIGRATION
+#include "qat.h"
+#endif
 #include "hw/boards.h" /* for machine_dump_guest_core() */
 
 #if defined(__linux__)
@@ -391,7 +393,7 @@ typedef struct RAMState RAMState;
 static RAMState *ram_state;
 
 static NotifierWithReturnList precopy_notifier_list;
-
+static int save_zero_page(RAMState *rs, RAMBlock *block, ram_addr_t offset);
 void precopy_infrastructure_init(void)
 {
     notifier_with_return_list_init(&precopy_notifier_list);
@@ -430,6 +432,10 @@ struct PageSearchStatus {
     RAMBlock    *block;
     /* Current page to search from */
     unsigned long page;
+#ifdef CONFIG_QAT_MIGRATION
+    MultiPageAddr mpa;
+#endif
+    bool first_page_in_block;
     /* Set once we wrap around */
     bool         complete_round;
 };
@@ -899,6 +905,25 @@ exit:
     return -1;
 }
 
+static void compress_save_cleanup(void)
+{
+#ifdef CONFIG_QAT_MIGRATION
+    if (migrate_compress_with_qat()) {
+        qat_cleanup();
+        return;
+    }
+#endif
+    compress_threads_save_cleanup();
+}
+static int compress_save_setup(void)
+{
+#ifdef CONFIG_QAT_MIGRATION
+    if (migrate_compress_with_qat()) {
+        return qat_setup(QAT_SETUP_COMPRESS);
+    }
+#endif
+    return compress_threads_save_setup();
+}
 /**
  * save_page_header: write page header to wire
  *
@@ -1063,8 +1088,8 @@ static int save_xbzrle_page(RAMState *rs, uint8_t **current_data,
 
     /* XBZRLE encoding (if there is no overflow) */
     encoded_len = xbzrle_encode_buffer_func(prev_cached_page, XBZRLE.current_buf,
-                                            TARGET_PAGE_SIZE, XBZRLE.encoded_buf,
-                                            TARGET_PAGE_SIZE);
+                                       TARGET_PAGE_SIZE, XBZRLE.encoded_buf,
+                                       TARGET_PAGE_SIZE);
 
     /*
      * Update the cache contents, so that it corresponds to the data
@@ -1107,9 +1132,86 @@ static int save_xbzrle_page(RAMState *rs, uint8_t **current_data,
 
     return 1;
 }
+#ifdef CONFIG_QAT_MIGRATION
+static inline void multi_page_addr_put_one(MultiPageAddr *mpa,
+                                           unsigned long offset,
+                                           unsigned long pages)
+{
+    unsigned long idx = mpa->last_idx;
+    unsigned long *addr = mpa->addr;
 
+    addr[idx] = (offset << TARGET_PAGE_BITS) | pages;
+    mpa->last_idx = idx + 1;
+    mpa->pages += pages;
+}
+
+inline unsigned long multi_page_addr_get_one(MultiPageAddr *mpa,
+                                            unsigned long idx)
+{
+    return mpa->addr[idx];
+}
+
+static inline unsigned long
+migration_bitmap_find_dirty_multiple(RAMState *rs,
+                                     RAMBlock *rb,
+                                     unsigned long start,
+                                     MultiPageAddr *mpa)
+{
+    unsigned long *bitmap = rb->bmap;
+    unsigned long size = rb->used_length >> TARGET_PAGE_BITS;
+    unsigned long pages = 0;
+
+    mpa->last_idx = 0;
+    mpa->pages = 0;
+    if (ramblock_is_ignored(rb)) {
+        return size;
+    }
+
+    if (start >= size) {
+        return size;
+    }
+
+    /* Second stage etc. */
+    while ((mpa->pages < RAM_SAVE_MULTI_PAGE_NUM)) {
+        start = find_next_bit(bitmap, size, start);
+        if (start >= size) {
+            start = find_next_bit(bitmap, size, 0);
+            return size;
+        }
+
+        uint64_t bit_offset = start & 0x3f;
+        if (unlikely(bit_offset == 63)) {
+            pages = 1;
+        } else {
+            uint64_t bitmap_offset;
+            uint64_t mask;
+            unsigned long value;
+            bitmap_offset = start >> 6;
+            value = bitmap[bitmap_offset];
+            mask = ~(((uint64_t)1 << bit_offset) - 1);
+            if (mask == (mask&value)) {
+                pages = 64 - bit_offset;
+                if ((start + pages) > size) {
+                    pages = size - start;
+                }
+            } else {
+                unsigned long end = find_next_zero_bit(bitmap, size, start);
+                pages = end - start;
+            }
+        }
+
+        if (mpa->pages + pages > RAM_SAVE_MULTI_PAGE_NUM) {
+            pages = RAM_SAVE_MULTI_PAGE_NUM - mpa->pages;
+        }
+        multi_page_addr_put_one(mpa, start, pages);
+        start += pages;
+    }
+
+    return start - 1;
+}
+#endif
 /**
- * migration_bitmap_find_dirty: find the next dirty page from start
+ * migration_bitmap_find_dirty_single: find the next dirty page from start
  *
  * Returns the page offset within memory region of the start of a dirty page
  *
@@ -1118,8 +1220,8 @@ static int save_xbzrle_page(RAMState *rs, uint8_t **current_data,
  * @start: page where we start the search
  */
 static inline
-unsigned long migration_bitmap_find_dirty(RAMState *rs, RAMBlock *rb,
-                                          unsigned long start)
+unsigned long migration_bitmap_find_dirty_single(RAMState *rs, RAMBlock *rb,
+                                                 unsigned long start)
 {
     unsigned long size = rb->used_length >> TARGET_PAGE_BITS;
     unsigned long *bitmap = rb->bmap;
@@ -1130,7 +1232,66 @@ unsigned long migration_bitmap_find_dirty(RAMState *rs, RAMBlock *rb,
 
     return find_next_bit(bitmap, size, start);
 }
+static inline unsigned long
+migration_bitmap_find_dirty(RAMState *rs, PageSearchStatus *pss)
+{
+#ifdef CONFIG_QAT_MIGRATION
+    if (!pss->first_page_in_block && migrate_compress_with_qat()) {
+        return migration_bitmap_find_dirty_multiple(rs, pss->block, pss->page, &pss->mpa);;
+    }
+#endif
+    return migration_bitmap_find_dirty_single(rs, pss->block, pss->page);
+}
 
+#ifdef CONFIG_QAT_MIGRATION
+int qat_save_zero_page(RAMBlock *block, MultiPageAddr *mpa)
+{
+    uint64_t start, offset, pages;
+    RAMState *rs = ram_state;
+    MultiPageAddr new_mpa = {0};
+    int ret;
+    int pre_zero_page;
+    int non_zero_page_num;
+    int zero_page_num = 0;
+    int checked_page_num = 0;
+    int check_zero_page = 1;
+    for (int i = 0; i < mpa->last_idx; i++) {
+        start = multi_page_addr_get_one(mpa, i);
+        pages = start & (~TARGET_PAGE_MASK);
+        start >>= TARGET_PAGE_BITS;
+        pre_zero_page = -1;
+        if (check_zero_page) {
+            for (int j = 0; j < pages; j++) {
+                offset = (start + j) << TARGET_PAGE_BITS;
+                ret = save_zero_page(rs, block, offset);
+                if (ret > 0) {
+                    non_zero_page_num = j - pre_zero_page - 1;
+                    if (non_zero_page_num) {
+                        multi_page_addr_put_one(&new_mpa, start + pre_zero_page + 1, non_zero_page_num);
+                    }
+                    pre_zero_page = j;
+                    zero_page_num++;
+                }
+                checked_page_num++;
+                if (unlikely(checked_page_num == 10)) {
+                    if (zero_page_num <= 1) {
+                        check_zero_page = 0;
+                        break;
+                    }
+                 }
+            }
+        }
+        non_zero_page_num = pages - pre_zero_page - 1;
+        if (non_zero_page_num) {
+            multi_page_addr_put_one(&new_mpa, start + pre_zero_page + 1, non_zero_page_num);
+        }
+    }
+    if (zero_page_num != 0) {
+        memcpy(mpa, &new_mpa, 2 * sizeof(unsigned long) + (new_mpa.last_idx + 1) * sizeof(unsigned long));
+    }
+    return 0;
+}
+#endif
 static void migration_clear_memory_region_dirty_bitmap(RAMBlock *rb,
                                                        unsigned long page)
 {
@@ -1211,7 +1372,7 @@ unsigned long colo_bitmap_find_dirty(RAMState *rs, RAMBlock *rb,
     return first;
 }
 
-static inline bool migration_bitmap_clear_dirty(RAMState *rs,
+static inline bool migration_bitmap_clear_dirty_single(RAMState *rs,
                                                 RAMBlock *rb,
                                                 unsigned long page)
 {
@@ -1234,7 +1395,40 @@ static inline bool migration_bitmap_clear_dirty(RAMState *rs,
 
     return ret;
 }
+#ifdef CONFIG_QAT_MIGRATION
+static inline void migration_bitmap_clear_dirty_multiple(RAMState *rs,
+                                                         RAMBlock *rb,
+                                                         MultiPageAddr *mpa)
+{
+    unsigned long start, multi_pages, page, i, j;
+    bool ret;
 
+    for (i = 0; i < mpa->last_idx; i++) {
+        start = multi_page_addr_get_one(mpa, i);
+        multi_pages = start & (~TARGET_PAGE_MASK);
+        start = start >> TARGET_PAGE_BITS;
+        for (j = 0; j < multi_pages; j++) {
+            page = start + j;
+
+            if (rb->clear_bmap && clear_bmap_test_and_clear(rb, page)) {
+                uint8_t shift = rb->clear_bmap_shift;
+                hwaddr size = 1ULL << (TARGET_PAGE_BITS + shift);
+                hwaddr start_addr = (page << TARGET_PAGE_BITS) & (-size);
+
+                assert(shift >= 6);
+                trace_migration_bitmap_clear_dirty(rb->idstr, start_addr, size, page);
+                memory_region_clear_dirty_bitmap(rb->mr, start_addr, size);
+            }
+
+            ret = test_and_clear_bit(page, rb->bmap);
+
+            if (ret) {
+                rs->migration_dirty_pages--;
+            }
+        }
+    }
+}
+#endif
 static void dirty_bitmap_clear_section(MemoryRegionSection *section,
                                        void *opaque)
 {
@@ -1672,7 +1866,60 @@ static int ram_save_multifd_page(RAMState *rs, RAMBlock *block,
 
     return 1;
 }
+#ifdef CONFIG_QAT_MIGRATION
+void save_compressed_page_header(RAMBlock *block,
+                                 MultiPageAddr *mpa,
+                                 uint64_t bytes,
+                                 uint32_t checksum)
+{
+    int i, header_bytes;
+    QEMUFile *f = ram_state->f;
+    ram_addr_t offset = multi_page_addr_get_one(mpa, 0) & TARGET_PAGE_MASK;
 
+    offset |= (RAM_SAVE_FLAG_COMPRESS_PAGE | RAM_SAVE_FLAG_CONTINUE);
+    qemu_put_be64(f, offset);
+
+    qemu_put_be64(f, bytes);
+    qemu_put_be64(f, mpa->pages);
+    qemu_put_be64(f, mpa->last_idx);
+    qemu_put_be32(f, checksum);
+    for (i = 0; i < mpa->last_idx; i++) {
+        qemu_put_be64(f, mpa->addr[i]);
+    }
+    header_bytes = sizeof(offset) + sizeof(bytes) +
+                   sizeof(mpa->pages) +  sizeof(mpa->last_idx) +
+                   mpa->last_idx * sizeof(mpa->addr[0]) + sizeof(checksum);
+    ram_counters.transferred += header_bytes;
+}
+
+void save_compressed_data(void *data, uint32_t bytes)
+{
+    QEMUFile *f = ram_state->f;
+
+    qemu_put_buffer(f, data, bytes);
+    ram_counters.transferred += bytes;
+}
+
+void save_uncompressed_page(RAMBlock *block, MultiPageAddr *mpa)
+{
+    int i, j, pages;
+    ram_addr_t start, offset;
+    QEMUFile *f = ram_state->f;
+
+    for (i = 0; i < mpa->last_idx; i++) {
+        start = multi_page_addr_get_one(mpa, i);
+        pages = start & (~TARGET_PAGE_MASK);
+        start &= TARGET_PAGE_MASK;
+        for (j = 0; j < pages; j++) {
+            offset = start + (j << TARGET_PAGE_BITS);
+            qemu_put_be64(f, offset | (RAM_SAVE_FLAG_CONTINUE | RAM_SAVE_FLAG_PAGE));
+            qemu_put_buffer(f, block->host + offset, TARGET_PAGE_SIZE);
+            ram_counters.transferred += (sizeof(offset) + TARGET_PAGE_SIZE);
+            ram_counters.normal++;
+        }
+    }
+}
+#endif
 static bool do_compress_ram_page(CompressParam *param, RAMBlock *block)
 {
     RAMState *rs = ram_state;
@@ -1731,6 +1978,11 @@ static void flush_compressed_data(RAMState *rs)
     if (!save_page_use_compression(rs)) {
         return;
     }
+#ifdef CONFIG_QAT_MIGRATION
+    if (migrate_compress_with_qat()) {
+        qat_flush_data_compress();
+    }
+#endif
     thread_count = migrate_compress_threads();
 
     qemu_mutex_lock(&comp_done_lock);
@@ -1746,10 +1998,10 @@ static void flush_compressed_data(RAMState *rs)
         if (!comp_param[idx].quit) {
             len = qemu_put_qemu_file(rs->f, comp_param[idx].file);
             /*
-             * it's safe to fetch zero_page without holding comp_done_lock
-             * as there is no further request submitted to the thread,
-             * i.e, the thread should be waiting for a request at this point.
-             */
+            * it's safe to fetch zero_page without holding comp_done_lock
+            * as there is no further request submitted to the thread,
+            * i.e, the thread should be waiting for a request at this point.
+            */
             update_compress_thread_counts(&comp_param[idx], len);
         }
         qemu_mutex_unlock(&comp_param[idx].mutex);
@@ -1811,7 +2063,7 @@ retry:
  */
 static bool find_dirty_block(RAMState *rs, PageSearchStatus *pss, bool *again)
 {
-    pss->page = migration_bitmap_find_dirty(rs, pss->block, pss->page);
+    pss->page = migration_bitmap_find_dirty(rs, pss);
     if (pss->complete_round && pss->block == rs->last_seen_block &&
         pss->page >= rs->last_page) {
         /*
@@ -1821,21 +2073,29 @@ static bool find_dirty_block(RAMState *rs, PageSearchStatus *pss, bool *again)
         *again = false;
         return false;
     }
+#ifdef CONFIG_QAT_MIGRATION
+    if (pss->mpa.pages) {
+        /* Can go around again, but... */
+        *again = true;
+        /* We've found something so probably don't need to */
+        return true;
+    }
+#endif
     if (!offset_in_ramblock(pss->block,
-                            ((ram_addr_t)pss->page) << TARGET_PAGE_BITS)) {
+            ((ram_addr_t)pss->page) << TARGET_PAGE_BITS)) {
         /* Didn't find anything in this RAM Block */
         pss->page = 0;
         pss->block = QLIST_NEXT_RCU(pss->block, next);
         if (!pss->block) {
             /*
-             * If memory migration starts over, we will meet a dirtied page
-             * which may still exists in compression threads's ring, so we
-             * should flush the compressed data to make sure the new page
-             * is not overwritten by the old one in the destination.
-             *
-             * Also If xbzrle is on, stop using the data compression at this
-             * point. In theory, xbzrle can do better than compression.
-             */
+            * If memory migration starts over, we will meet a dirtied page
+            * which may still exists in compression threads's ring, so we
+            * should flush the compressed data to make sure the new page
+            * is not overwritten by the old one in the destination.
+            *
+            * Also If xbzrle is on, stop using the data compression at this
+            * point. In theory, xbzrle can do better than compression.
+            */
             flush_compressed_data(rs);
 
             /* Hit the end of the list */
@@ -2150,7 +2410,7 @@ int ram_write_tracking_start(void)
                 block->max_length, true, false)) {
             goto fail;
         }
-
+        
         trace_ram_write_tracking_ramblock_start(block->idstr, block->page_size,
                 block->host, block->max_length);
     }
@@ -2433,7 +2693,7 @@ static bool save_page_use_compression(RAMState *rs)
  * has been properly handled by compression, otherwise needs other
  * paths to handle it
  */
-static bool save_compress_page(RAMState *rs, RAMBlock *block, ram_addr_t offset)
+static bool save_compress_page(RAMState *rs, PageSearchStatus *pss)
 {
     if (!save_page_use_compression(rs)) {
         return false;
@@ -2449,14 +2709,26 @@ static bool save_compress_page(RAMState *rs, RAMBlock *block, ram_addr_t offset)
      * We post the fist page as normal page as compression will take
      * much CPU resource.
      */
-    if (block != rs->last_sent_block) {
+    if (pss->first_page_in_block) {
         flush_compressed_data(rs);
         return false;
     }
 
-    if (compress_page_with_multi_thread(rs, block, offset) > 0) {
-        return true;
+    int ret;
+#ifdef CONFIG_QAT_MIGRATION
+    if (migrate_compress_with_qat()) {
+        ret = qat_compress_page(pss->block, &pss->mpa);
+        if (ret < 0) {
+            error_report("%s: qat_compress_page failed", __func__);
+        }
+    } else {
+#endif
+        ret = compress_page_with_multi_thread(rs, pss->block, pss->page << TARGET_PAGE_BITS);
+#ifdef CONFIG_QAT_MIGRATION
     }
+#endif
+    if (ret >= 0)
+        return true;
 
     compression_counters.busy++;
     return false;
@@ -2482,7 +2754,7 @@ static int ram_save_target_page(RAMState *rs, PageSearchStatus *pss,
         return res;
     }
 
-    if (save_compress_page(rs, block, offset)) {
+    if (save_compress_page(rs, pss)) {
         return 1;
     }
 
@@ -2513,7 +2785,19 @@ static int ram_save_target_page(RAMState *rs, PageSearchStatus *pss,
 
     return ram_save_page(rs, pss, last_stage);
 }
+#ifdef CONFIG_QAT_MIGRATION
+static int ram_save_host_page_multiple(RAMState *rs, PageSearchStatus *pss,
+                                       bool last_stage)
+{
+    migration_bitmap_clear_dirty_multiple(rs, pss->block, &pss->mpa);
+    if (save_compress_page(rs, pss)) {
+        return pss->mpa.pages;
+    }
 
+    error_report("%s: ERROR", __func__);
+    return -1;
+}
+#endif
 /**
  * ram_save_host_page: save a whole host page
  *
@@ -2532,7 +2816,7 @@ static int ram_save_target_page(RAMState *rs, PageSearchStatus *pss,
  * @pss: data about the page we want to send
  * @last_stage: if we are at the completion stage
  */
-static int ram_save_host_page(RAMState *rs, PageSearchStatus *pss,
+static int ram_save_host_page_single(RAMState *rs, PageSearchStatus *pss,
                               bool last_stage)
 {
     int tmppages, pages = 0;
@@ -2543,14 +2827,9 @@ static int ram_save_host_page(RAMState *rs, PageSearchStatus *pss,
     unsigned long start_page = pss->page;
     int res;
 
-    if (ramblock_is_ignored(pss->block)) {
-        error_report("block %s should not be migrated !", pss->block->idstr);
-        return 0;
-    }
-
     do {
         /* Check the pages is dirty and if it is send it */
-        if (migration_bitmap_clear_dirty(rs, pss->block, pss->page)) {
+        if (migration_bitmap_clear_dirty_single(rs, pss->block, pss->page)) {
             tmppages = ram_save_target_page(rs, pss, last_stage);
             if (tmppages < 0) {
                 return tmppages;
@@ -2565,7 +2844,7 @@ static int ram_save_host_page(RAMState *rs, PageSearchStatus *pss,
                 migration_rate_limit();
             }
         }
-        pss->page = migration_bitmap_find_dirty(rs, pss->block, pss->page);
+        pss->page = migration_bitmap_find_dirty(rs, pss);
     } while ((pss->page < hostpage_boundary) &&
              offset_in_ramblock(pss->block,
                                 ((ram_addr_t)pss->page) << TARGET_PAGE_BITS));
@@ -2575,7 +2854,21 @@ static int ram_save_host_page(RAMState *rs, PageSearchStatus *pss,
     res = ram_save_release_protection(rs, pss, start_page);
     return (res < 0 ? res : pages);
 }
+static int ram_save_host_page(RAMState *rs, PageSearchStatus *pss,
+                              bool last_stage)
+{
 
+    if (ramblock_is_ignored(pss->block)) {
+        error_report("block %s should not be migrated !", pss->block->idstr);
+        return 0;
+    }
+#ifdef CONFIG_QAT_MIGRATION
+    if (!pss->first_page_in_block && migrate_compress_with_qat()) {
+        return ram_save_host_page_multiple(rs, pss, last_stage);
+    }
+#endif
+    return ram_save_host_page_single(rs, pss, last_stage);
+}
 /**
  * ram_find_and_save_block: finds a dirty page and sends it to f
  *
@@ -2605,7 +2898,11 @@ static int ram_find_and_save_block(RAMState *rs, bool last_stage)
     pss.block = rs->last_seen_block;
     pss.page = rs->last_page;
     pss.complete_round = false;
-
+    pss.first_page_in_block = false;
+#ifdef CONFIG_QAT_MIGRATION
+    pss.mpa.pages = 0;
+    pss.mpa.last_idx = 0;
+#endif
     if (!pss.block) {
         pss.block = QLIST_FIRST_RCU(&ram_list.blocks);
     }
@@ -2615,6 +2912,11 @@ static int ram_find_and_save_block(RAMState *rs, bool last_stage)
         found = get_queued_page(rs, &pss);
 
         if (!found) {
+            if (pss.block != rs->last_seen_block) {
+                pss.first_page_in_block = true;
+            } else {
+                pss.first_page_in_block = false;
+            }
             /* priority queue empty, so just search for something dirty */
             found = find_dirty_block(rs, &pss, &again);
         }
@@ -2733,7 +3035,7 @@ static void ram_save_cleanup(void *opaque)
     }
 
     xbzrle_cleanup();
-    compress_threads_save_cleanup();
+    compress_save_cleanup();
     ram_state_cleanup(rsp);
 }
 
@@ -3328,14 +3630,14 @@ static int ram_save_setup(QEMUFile *f, void *opaque)
     RAMState **rsp = opaque;
     RAMBlock *block;
 
-    if (compress_threads_save_setup()) {
+    if (compress_save_setup()) {
         return -1;
     }
 
     /* migration has already setup the bitmap, reuse it. */
     if (!migration_in_colo_state()) {
         if (ram_init_all(rsp) != 0) {
-            compress_threads_save_cleanup();
+            compress_save_cleanup();
             return -1;
         }
     }
@@ -3471,6 +3773,7 @@ out:
     if (ret >= 0
         && migration_is_setup_or_active(migrate_get_current()->state)) {
         multifd_send_sync_main(rs->f);
+        flush_compressed_data(rs);
         qemu_put_be64(f, RAM_SAVE_FLAG_EOS);
         qemu_fflush(f);
         ram_counters.transferred += 8;
@@ -3512,7 +3815,6 @@ static int ram_save_complete(QEMUFile *f, void *opaque)
         /* flush all remaining blocks regardless of rate limiting */
         while (true) {
             int pages;
-
             pages = ram_find_and_save_block(rs, !migration_in_colo_state());
             /* no more blocks to sent */
             if (pages == 0) {
@@ -3968,6 +4270,26 @@ void colo_release_ram_cache(void)
     ram_state_cleanup(&ram_state);
 }
 
+static int decompress_load_setup(QEMUFile *f)
+{
+#ifdef CONFIG_QAT_MIGRATION
+    if (migrate_compress_with_qat()) {
+        return qat_setup(QAT_SETUP_DECOMPRESS);
+    }
+#endif
+    return compress_threads_load_setup(f);
+}
+
+static void decompress_load_cleanup(void)
+{
+#ifdef CONFIG_QAT_MIGRATION
+    if (migrate_compress_with_qat()) {
+        qat_cleanup();
+    }
+#endif
+    compress_threads_load_cleanup();
+}
+
 /**
  * ram_load_setup: Setup RAM for migration incoming side
  *
@@ -3978,7 +4300,7 @@ void colo_release_ram_cache(void)
  */
 static int ram_load_setup(QEMUFile *f, void *opaque)
 {
-    if (compress_threads_load_setup(f)) {
+    if (decompress_load_setup(f)) {
         return -1;
     }
 
@@ -3997,7 +4319,7 @@ static int ram_load_cleanup(void *opaque)
     }
 
     xbzrle_load_cleanup();
-    compress_threads_load_cleanup();
+    decompress_load_cleanup();
 
     RAMBLOCK_FOREACH_NOT_IGNORED(rb) {
         g_free(rb->receivedmap);
@@ -4253,7 +4575,7 @@ void colo_flush_ram_cache(void)
                 unsigned long i = 0;
 
                 for (i = 0; i < num; i++) {
-                    migration_bitmap_clear_dirty(ram_state, block, offset + i);
+                    migration_bitmap_clear_dirty_single(ram_state, block, offset + i);
                 }
                 dst_host = block->host
                          + (((ram_addr_t)offset) << TARGET_PAGE_BITS);
@@ -4267,7 +4589,51 @@ void colo_flush_ram_cache(void)
     trace_colo_flush_ram_cache_end();
     qemu_mutex_unlock(&ram_state->bitmap_mutex);
 }
+static int decompress_page_single(QEMUFile *f, void *host)
+{
+    int len = qemu_get_be32(f);
+    if (decompress_ops->check_len(len)) {
+        error_report("Invalid compressed data length: %d", len);
+        return -EINVAL;
+    }
+    decompress_data_with_multi_threads(f, host, len);
+    return 0;
+}
+#ifdef CONFIG_QAT_MIGRATION
+static int decompress_page_multiple(QEMUFile *f, RAMBlock *block,
+                                    ram_addr_t addr)
+{
+    unsigned long bytes;
+    unsigned long i;
+    MultiPageAddr mpa;
+    uint32_t checksum;
+    int ret;
 
+    bytes = qemu_get_be64(f);
+    mpa.pages = qemu_get_be64(f);
+    mpa.last_idx = qemu_get_be64(f);
+    mpa.addr[0] = 0;
+    checksum = qemu_get_be32(f);
+
+    for (i = 0; i < mpa.last_idx; i++) {
+        mpa.addr[i] = qemu_get_be64(f);
+    }
+
+    /* Sanity check */
+    if ((mpa.addr[0] & TARGET_PAGE_MASK) != addr) {
+        error_report("%s: unmatched addr recerived", __func__);
+        return -EINVAL;
+    }
+    ret = 0;
+    if (migrate_compress_with_qat()) {
+        ret = qat_decompress_page(f, block, bytes, &mpa, checksum);
+    } else {
+        error_report("%s: CPU doesn't supported multipage compress", __func__);
+    }
+
+    return ret;
+}
+#endif
 /**
  * ram_load_precopy: load pages in precopy case
  *
@@ -4280,6 +4646,7 @@ void colo_flush_ram_cache(void)
  */
 static int ram_load_precopy(QEMUFile *f)
 {
+    RAMBlock *block = NULL;
     int flags = 0, ret = 0, invalid_flags = 0, len = 0, i = 0;
     /* ADVISE is earlier, it shows the source has the postcopy capability on */
     bool postcopy_advised = postcopy_is_advised();
@@ -4318,7 +4685,7 @@ static int ram_load_precopy(QEMUFile *f)
 
         if (flags & (RAM_SAVE_FLAG_ZERO | RAM_SAVE_FLAG_PAGE |
                      RAM_SAVE_FLAG_COMPRESS_PAGE | RAM_SAVE_FLAG_XBZRLE)) {
-            RAMBlock *block = ram_block_from_stream(f, flags);
+            block = ram_block_from_stream(f, flags);
 
             host = host_from_ram_block_offset(block, addr);
             /*
@@ -4361,7 +4728,6 @@ static int ram_load_precopy(QEMUFile *f)
             /* Synchronize RAM block list */
             total_ram_bytes = addr;
             while (!ret && total_ram_bytes) {
-                RAMBlock *block;
                 char id[256];
                 ram_addr_t length;
 
@@ -4429,13 +4795,12 @@ static int ram_load_precopy(QEMUFile *f)
             break;
 
         case RAM_SAVE_FLAG_COMPRESS_PAGE:
-            len = qemu_get_be32(f);
-            if (decompress_ops->check_len(len)) {
-                error_report("Invalid compressed data length: %d", len);
-                ret = -EINVAL;
-                break;
+#ifdef CONFIG_QAT_MIGRATION
+            if (migrate_compress_with_qat()) {
+                ret = decompress_page_multiple(f, block, addr);
             }
-            decompress_data_with_multi_threads(f, host, len);
+#endif
+            ret = decompress_page_single(f, host);
             break;
 
         case RAM_SAVE_FLAG_XBZRLE:
@@ -4466,11 +4831,22 @@ static int ram_load_precopy(QEMUFile *f)
             memcpy(host_bak, host, TARGET_PAGE_SIZE);
         }
     }
-
-    ret |= wait_for_decompress_done();
+#ifdef CONFIG_QAT_MIGRATION
+    if (!migrate_compress_with_qat()) {
+        ret |= wait_for_decompress_done();
+    }
+#endif
     return ret;
 }
-
+#ifdef CONFIG_QAT_MIGRATION
+static void flush_decompressed_data(void)
+{
+    if (!migrate_compress_with_qat()) {
+        return;
+    }
+    qat_flush_data_decompress();
+}
+#endif
 static int ram_load(QEMUFile *f, void *opaque, int version_id)
 {
     int ret = 0;
@@ -4499,6 +4875,11 @@ static int ram_load(QEMUFile *f, void *opaque, int version_id)
         } else {
             ret = ram_load_precopy(f);
         }
+#ifdef CONFIG_QAT_MIGRATION
+        if (migrate_use_compression()) {
+            flush_decompressed_data();
+        }
+#endif
     }
     trace_ram_load_complete(ret, seq_iter);
 

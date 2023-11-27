@@ -392,5 +392,7 @@ bool migration_rate_limit(void);
 void migration_cancel(const Error *error);
 
 void populate_vfio_info(MigrationInfo *info);
-
+#ifdef CONFIG_QAT_MIGRATION
+bool migrate_compress_with_qat(void);
+#endif
 #endif
