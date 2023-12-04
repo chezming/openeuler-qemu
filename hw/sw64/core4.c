@@ -163,6 +163,7 @@ static void core4_machine_class_init(ObjectClass *oc, void *data)
     mc->init = core4_init;
     mc->block_default_type = IF_IDE;
     mc->max_cpus = MAX_CPUS_CORE4;
+    mc->no_cdrom = 1;
     mc->reset = sw64_board_reset;
     mc->possible_cpu_arch_ids = sw64_possible_cpu_arch_ids;
     mc->default_cpu_type = SW64_CPU_TYPE_NAME("core4");

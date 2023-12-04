@@ -97,6 +97,7 @@ static void core3_machine_class_init(ObjectClass *oc, void *data)
     mc->init = core3_init;
     mc->block_default_type = IF_IDE;
     mc->max_cpus = MAX_CPUS_CORE3;
+    mc->no_cdrom = 1;
     mc->pci_allow_0_address = true;
     mc->is_default = true;
     mc->reset = sw64_board_reset;
