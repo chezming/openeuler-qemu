@@ -4229,7 +4229,6 @@ void colo_flush_ram_cache(void)
     unsigned long offset = 0;
 
     memory_global_dirty_log_sync();
-    qemu_mutex_lock(&ram_state->bitmap_mutex);
     WITH_RCU_READ_LOCK_GUARD() {
         RAMBLOCK_FOREACH_NOT_IGNORED(block) {
             ramblock_sync_dirty_bitmap(ram_state, block);
@@ -4265,7 +4264,6 @@ void colo_flush_ram_cache(void)
         }
     }
     trace_colo_flush_ram_cache_end();
-    qemu_mutex_unlock(&ram_state->bitmap_mutex);
 }
 
 /**
