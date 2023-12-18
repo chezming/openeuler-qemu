@@ -291,6 +291,10 @@ migration_exec_incoming(const char *cmd) "cmd=%s"
 migration_fd_outgoing(int fd) "fd=%d"
 migration_fd_incoming(int fd) "fd=%d"
 
+# file.c
+migration_file_outgoing(const char *filename) "filename=%s"
+migration_file_incoming(const char *filename) "filename=%s"
+
 # socket.c
 migration_socket_incoming_accepted(void) ""
 migration_socket_outgoing_connected(const char *hostname) "hostname=%s"
@@ -311,6 +315,14 @@ colo_receive_message(const char *msg) "Receive '%s' message"
 
 # colo-failover.c
 colo_failover_set_state(const char *new_state) "new state %s"
+
+# cpr-state.c
+cpr_save_fd(const char *name, int id, int fd) "%s, id %d, fd %d"
+cpr_delete_fd(const char *name, int id) "%s, id %d"
+cpr_find_fd(const char *name, int id, int fd) "%s, id %d returns %d"
+cpr_save_memfd(const char *name, size_t len, size_t maxlen, uint64_t align) "%s, len %lu, maxlen %lu, align %lu"
+cpr_delete_memfd(const char *name) "%s"
+cpr_find_memfd(const char *name, size_t len, size_t maxlen, uint64_t align) "%s, len %lu, maxlen %lu, align %lu"
 
 # block-dirty-bitmap.c
 send_bitmap_header_enter(void) ""

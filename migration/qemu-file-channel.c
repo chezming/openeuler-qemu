@@ -27,8 +27,10 @@
 #include "qemu-file.h"
 #include "io/channel-socket.h"
 #include "io/channel-tls.h"
+#include "io/channel-file.h"
 #include "qemu/iov.h"
 #include "qemu/yank.h"
+#include "qapi/error.h"
 #include "yank_functions.h"
 
 
@@ -191,4 +193,14 @@ QEMUFile *qemu_fopen_channel_output(QIOChannel *ioc)
 {
     object_ref(OBJECT(ioc));
     return qemu_fopen_ops(ioc, &channel_output_ops, true);
+}
+
+QEMUFile *qemu_fopen_fd(int fd, bool writable, const char *name)
+{
+    g_autoptr(QIOChannelFile) fioc = qio_channel_file_new_fd(fd);
+    QIOChannel *ioc = QIO_CHANNEL(fioc);
+    QEMUFile *f = writable ? qemu_fopen_channel_output(ioc) :
+                             qemu_fopen_channel_input(ioc);
+    qio_channel_set_name(ioc, name);
+    return f;
 }

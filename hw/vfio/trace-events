@@ -9,6 +9,7 @@ vfio_intx_update(const char *name, int new_irq, int target_irq) " (%s) IRQ moved
 vfio_intx_enable(const char *name) " (%s)"
 vfio_intx_disable(const char *name) " (%s)"
 vfio_msi_interrupt(const char *name, int index, uint64_t addr, int data) " (%s) vector %d 0x%"PRIx64"/0x%x"
+vfio_msi_interrupt_compensate(const char *name, int index, uint64_t addr, int data) " (%s) vector %d 0x%"PRIx64"/0x%x"
 vfio_msix_vector_do_use(const char *name, int index) " (%s) vector %d used"
 vfio_msix_vector_release(const char *name, int index) " (%s) vector %d released"
 vfio_msix_enable(const char *name) " (%s)"
@@ -118,6 +119,7 @@ vfio_region_sparse_mmap_header(const char *name, int index, int nr_areas) "Devic
 vfio_region_sparse_mmap_entry(int i, unsigned long start, unsigned long end) "sparse entry %d [0x%lx - 0x%lx]"
 vfio_get_dev_region(const char *name, int index, uint32_t type, uint32_t subtype) "%s index %d, %08x/%08x"
 vfio_dma_unmap_overflow_workaround(void) ""
+vfio_region_remap(const char *name, int fd, uint64_t iova_start, uint64_t iova_end, void *vaddr) "%s fd %d 0x%"PRIx64" - 0x%"PRIx64" [%p]"
 
 # platform.c
 vfio_platform_base_device_init(char *name, int groupid) "%s belongs to group #%d"
