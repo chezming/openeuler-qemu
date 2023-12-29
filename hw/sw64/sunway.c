@@ -40,9 +40,24 @@
 #define SW_FDT_BASE 0x2d00000ULL
 #define SW_INITRD_BASE 0x3000000UL
 
+static uint64_t base_rtc;
+static uint64_t last_update;
+
+void sw64_init_rtc_base_info(void)
+{
+    struct tm tm;
+    qemu_get_timedate(&tm, 0);
+    base_rtc = mktimegm(&tm);
+    last_update = get_clock_realtime() / NANOSECONDS_PER_SECOND;
+}
+
 static uint64_t rtc_read(void *opaque, hwaddr addr, unsigned size)
 {
-    uint64_t val = get_clock_realtime() / NANOSECONDS_PER_SECOND;
+    uint64_t val;
+    uint64_t guest_clock = get_clock_realtime() / NANOSECONDS_PER_SECOND;
+
+    val = base_rtc + guest_clock - last_update;
+
     return val;
 }
 

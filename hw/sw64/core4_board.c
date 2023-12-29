@@ -275,6 +275,7 @@ void core4_board_init(MachineState *ms)
                           "pci0-ep-conf-io", 4 * GB);
     memory_region_add_subregion(get_system_memory(), 0x880600000000ULL,
                                 &bs->conf_piu0);
+    sw64_init_rtc_base_info();
     memory_region_init_io(&bs->io_rtc, OBJECT(bs), &rtc_ops, b,
 		          "sw64-rtc", 0x08ULL);
     memory_region_add_subregion(get_system_memory(), 0x804910000000ULL,

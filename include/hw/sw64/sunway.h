@@ -11,6 +11,8 @@ extern const MemoryRegionOps sw64_pci_ignore_ops;
 extern const MemoryRegionOps sw64_pci_config_ops;
 extern const MemoryRegionOps msi_ops;
 
+void sw64_init_rtc_base_info(void);
+
 uint64_t cpu_sw64_virt_to_phys(void *opaque, uint64_t addr);
 CpuInstanceProperties sw64_cpu_index_to_props(MachineState *ms,
 		                              unsigned cpu_index);
