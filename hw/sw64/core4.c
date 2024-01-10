@@ -39,6 +39,9 @@ static void core4_init(MachineState *machine)
     char *hmcode_filename;
     uint64_t hmcode_entry, kernel_entry;
 
+    if (kvm_enabled())
+        sw64_set_clocksource();
+
     core4_board_init(machine);
 
     sw64_set_ram_size(ram_size);

@@ -251,6 +251,28 @@ void sw64_cpu_reset(void *opaque)
     return;
 }
 
+void sw64_set_clocksource()
+{
+	FILE *fp;
+	unsigned long mclk;
+	char buff[64];
+
+	fp = fopen("/sys/kernel/debug/sw64/mclk", "rb");
+	if (fp == NULL) {
+	    printf("failed to set mclk\n");
+	    return;
+	}
+
+	fgets(buff, 64, fp);
+
+	mclk = atoi(buff);
+
+	fclose(fp);
+
+	rom_add_blob_fixed("mclk", (char *) &mclk, 0x8, 0x908001);
+
+}
+
 void sw64_board_reset(MachineState *state)
 {
     qemu_devices_reset();
