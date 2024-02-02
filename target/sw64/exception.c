@@ -2,13 +2,13 @@
 #include "qemu/timer.h"
 
 #include "cpu.h"
-#include "exec/exec-all.h"
+#include "exec/cpu-common.h"
 #include "fpu/softfloat.h"
 #include "exec/helper-proto.h"
 #include "hw/core/cpu.h"
 
 #ifndef CONFIG_USER_ONLY
-void QEMU_NORETURN sw64_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
+G_NORETURN void sw64_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
                                   MMUAccessType access_type,
 				  int mmu_idx, uintptr_t retaddr)
 {
@@ -16,9 +16,9 @@ void QEMU_NORETURN sw64_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
     CPUSW64State *env = &cpu->env;
     uint32_t insn = 0;
 
-    if (retaddr) {
-        cpu_restore_state(cs, retaddr, true);
-    }
+//    if (retaddr) {
+//        cpu_restore_state(cs, retaddr);
+//    }
 
     fprintf(stderr, "Error %s addr = %lx\n", __func__, addr);
     if (test_feature(env, SW64_FEATURE_CORE3))
@@ -37,7 +37,7 @@ void QEMU_NORETURN sw64_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
 
 /* This should only be called from translate, via gen_excp.
    We expect that ENV->PC has already been updated.  */
-void QEMU_NORETURN helper_excp(CPUSW64State *env, int excp, int error)
+void G_NORETURN helper_excp(CPUSW64State *env, int excp, int error)
 {
     SW64CPU *cpu = sw64_env_get_cpu(env);
     CPUState *cs = CPU(cpu);
@@ -48,7 +48,7 @@ void QEMU_NORETURN helper_excp(CPUSW64State *env, int excp, int error)
 }
 
 /* This may be called from any of the helpers to set up EXCEPTION_INDEX.  */
-void QEMU_NORETURN dynamic_excp(CPUSW64State *env, uintptr_t retaddr, int excp,
+void G_NORETURN dynamic_excp(CPUSW64State *env, uintptr_t retaddr, int excp,
                                 int error)
 {
     SW64CPU *cpu = sw64_env_get_cpu(env);
@@ -58,14 +58,14 @@ void QEMU_NORETURN dynamic_excp(CPUSW64State *env, uintptr_t retaddr, int excp,
     env->error_code = error;
     if (retaddr) {
         /* FIXME: Not jump to another tb, but jump to next insn emu */
-        cpu_restore_state(cs, retaddr, true);
+//        cpu_restore_state(cs, retaddr); attention !!!!!!!
         /* Floating-point exceptions (our only users) point to the next PC.  */
         env->pc += 4;
     }
     cpu_loop_exit(cs);
 }
 
-void QEMU_NORETURN arith_excp(CPUSW64State *env, uintptr_t retaddr, int exc,
+void G_NORETURN arith_excp(CPUSW64State *env, uintptr_t retaddr, int exc,
                               uint64_t mask)
 {
     env->csr[EXC_SUM] = exc;

@@ -6,9 +6,7 @@ sw64_ss.add(files(
   'helper.c',
   'gdbstub.c',
   'int_helper.c',
-  'profile.c',
   'simd_helper.c',
-  'translate.c',
 ))
 
 sw64_ss.add(when: 'CONFIG_KVM', if_true: files('kvm.c'))

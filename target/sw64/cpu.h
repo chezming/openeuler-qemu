@@ -60,11 +60,7 @@
 
 #define MCU_CLOCK 25000000
 
-typedef struct CPUSW64State CPUSW64State;
-typedef CPUSW64State CPUArchState;
-typedef SW64CPU ArchCPU;
-
-struct CPUSW64State {
+typedef struct CPUArchState {
     uint64_t ir[32];
     uint64_t fr[128];
     uint64_t pc;
@@ -114,7 +110,7 @@ struct CPUSW64State {
     uint64_t sync_pendding_status;
     uint8_t vlenma_idxa;
     uint8_t stable;
-};
+} CPUSW64State;
 #define SW64_FEATURE_CORE3  0x2
 #define SW64_FEATURE_CORE4  0x4
 
@@ -129,12 +125,12 @@ static inline void set_feature(CPUSW64State *env, int feature)
  *
  * An SW64 CPU
  */
-struct SW64CPU {
+struct ArchCPU {
     /*< private >*/
     CPUState parent_obj;
     /*< public >*/
-    CPUNegativeOffsetState neg;
     CPUSW64State env;
+    CPUNegativeOffsetState neg;
 
     uint64_t k_regs[158];
     uint64_t k_vcb[48];
@@ -245,9 +241,9 @@ void sw64_cpu_do_interrupt(CPUState *cs);
 bool sw64_cpu_exec_interrupt(CPUState *cpu, int int_req);
 #endif
 void cpu_sw64_store_fpcr(CPUSW64State *env, uint64_t val);
-void sw64_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
-    MMUAccessType access_type, int mmu_idx,
-    uintptr_t retaddr) QEMU_NORETURN;
+G_NORETURN void sw64_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
+                                             MMUAccessType access_type, int mmu_idx,
+					     uintptr_t retaddr);
 bool sw64_cpu_has_work(CPUState *cs);
 extern struct VMStateDescription vmstate_sw64_cpu;
 void sw64_cpu_list(void);
@@ -406,9 +402,9 @@ enum {
 #define EXC_M_IOV 64 /* Integer Overflow */
 #define EXC_M_DNO 128 /* Denomal operation */
 
-void QEMU_NORETURN dynamic_excp(CPUSW64State *env, uintptr_t retaddr, int excp,
+void dynamic_excp(CPUSW64State *env, uintptr_t retaddr, int excp,
     int error);
-void QEMU_NORETURN arith_excp(CPUSW64State *env, uintptr_t retaddr, int exc,
+void arith_excp(CPUSW64State *env, uintptr_t retaddr, int exc,
     uint64_t mask);
 
 #define DEBUG_ARCH

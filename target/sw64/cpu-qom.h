@@ -21,7 +21,7 @@
 #include "qom/object.h"
 
 #define TYPE_SW64_CPU "sw64-cpu"
-OBJECT_DECLARE_TYPE(SW64CPU, SW64CPUClass, SW64_CPU)
+OBJECT_DECLARE_CPU_TYPE(SW64CPU, SW64CPUClass, SW64_CPU)
 /**
  * SW64CPUClass:
  * @parent_realize: The parent class' realize handler.

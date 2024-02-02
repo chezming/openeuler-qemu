@@ -13,6 +13,4 @@
 #define TARGET_VIRT_ADDR_SPACE_BITS  64
 #define TARGET_PHYS_ADDR_SPACE_BITS  48
 
-#define NB_MMU_MODES 4
-
 #endif

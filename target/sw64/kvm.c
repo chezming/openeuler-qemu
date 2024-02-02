@@ -13,7 +13,6 @@
 
 #include <linux/kvm.h>
 
-#include "qemu-common.h"
 #include "qemu/timer.h"
 #include "qemu/error-report.h"
 #include "sysemu/sysemu.h"
@@ -37,7 +36,7 @@ int kvm_sw64_vcpu_init(CPUState *cs)
 {
     struct kvm_regs *regs;
     SW64CPU *cpu = SW64_CPU(cs);
-    CPUSW64State *env = cs->env_ptr;
+    CPUSW64State *env = cpu_env(cs);
     regs = (struct kvm_regs *)cpu->k_regs;
     if (test_feature(env, SW64_FEATURE_CORE3))
         regs->c3_regs.pc = core3_init_pc;
@@ -78,7 +77,7 @@ void kvm_sw64_reset_vcpu(SW64CPU *cpu)
 {
     struct kvm_regs *regs;
     CPUState *cs = CPU(cpu);
-    CPUSW64State *env = cs->env_ptr;
+    CPUSW64State *env = cpu_env(cs);
     int ret;
     regs = (struct kvm_regs *)cpu->k_regs;
     if (test_feature(env, SW64_FEATURE_CORE3))
@@ -357,3 +356,13 @@ bool kvm_arch_cpu_check_are_resettable(void)
 {
     return true;
 }
+
+void kvm_arch_accel_class_init(ObjectClass *oc)
+{
+}
+
+int kvm_arch_get_default_type(MachineState *ms)
+{
+    return 0;
+}
+

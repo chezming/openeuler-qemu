@@ -7,7 +7,6 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu-common.h"
 #include "qemu/datadir.h"
 #include "qapi/error.h"
 #include "cpu.h"
@@ -20,6 +19,7 @@
 #include "sysemu/sysemu.h"
 #include "sysemu/kvm.h"
 #include "sysemu/reset.h"
+#include "sysemu/rtc.h"
 #include "hw/ide.h"
 #include "hw/char/serial.h"
 #include "hw/pci/msi.h"
@@ -251,7 +251,7 @@ void sw64_cpu_reset(void *opaque)
     return;
 }
 
-void sw64_set_clocksource()
+void sw64_set_clocksource(void)
 {
 	FILE *fp;
 	unsigned long mclk;
@@ -273,9 +273,9 @@ void sw64_set_clocksource()
 
 }
 
-void sw64_board_reset(MachineState *state)
+void sw64_board_reset(MachineState *state, ShutdownCause reason)
 {
-    qemu_devices_reset();
+    qemu_devices_reset(reason);
 }
 
 void sw64_set_ram_size(ram_addr_t ram_size)
@@ -477,7 +477,7 @@ void sw64_virt_build_smbios(FWCfgState *fw_cfg)
 
     smbios_set_defaults("QEMU", product,
 		        "sw64", false,
-			true, SMBIOS_ENTRY_POINT_30);
+			true, SMBIOS_ENTRY_POINT_TYPE_64);
 
     smbios_get_tables(MACHINE(qdev_get_machine()), NULL, 0,
 		      &smbios_tables, &smbios_tables_len,
@@ -553,8 +553,7 @@ void sw64_create_pcie(BoardState *bs, PCIBus *b, PCIHostState *phb)
 
     pci_vga_init(b);
 
-    ahci = pci_create_simple_multifunction(b, PCI_DEVFN(0x1f, 0), true,
-		                           TYPE_ICH9_AHCI);
+    ahci = pci_create_simple_multifunction(b, PCI_DEVFN(0x1f, 0), TYPE_ICH9_AHCI);
     g_assert(MAX_SATA_PORTS == ahci_get_num_ports(ahci));
     ide_drive_get(hd, ahci_get_num_ports(ahci));
     ahci_ide_create_devs(ahci, hd);

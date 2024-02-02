@@ -20,9 +20,9 @@ int64_t sw64_get_default_cpu_node_id(const MachineState *ms,
 		                     int idx);
 const CPUArchIdList *sw64_possible_cpu_arch_ids(MachineState *ms);
 void sw64_cpu_reset(void *opaque);
-void sw64_board_reset(MachineState *state);
+void sw64_board_reset(MachineState *state, ShutdownCause reason);
 
-void sw64_set_clocksource();
+void sw64_set_clocksource(void);
 void sw64_set_ram_size(ram_addr_t ram_size);
 void sw64_load_hmcode(const char *hmcode_filename, uint64_t *hmcode_entry);
 void sw64_find_and_load_bios(const char *bios_name);

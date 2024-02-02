@@ -25,6 +25,7 @@
 #include "hw/firmware/smbios.h"
 #include "sysemu/device_tree.h"
 #include "qemu/datadir.h"
+#include "qemu/error-report.h"
 
 #define CORE3_MAX_CPUS_MASK		0x3ff
 #define CORE3_CORES_SHIFT		10

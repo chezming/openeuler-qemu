@@ -156,6 +156,7 @@ bool sw64_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
 		      MMUAccessType access_type, int mmu_idx,
 		      bool probe, uintptr_t retaddr)
 {
+/*
     SW64CPU *cpu = SW64_CPU(cs);
     CPUSW64State *env = &cpu->env;
     target_ulong phys;
@@ -193,6 +194,7 @@ do_pgmiss:
 done:
     tlb_set_page(cs, address & TARGET_PAGE_MASK, phys & TARGET_PAGE_MASK, prot,
                  mmu_idx, TARGET_PAGE_SIZE);
+*/
     return true;
 }
 
@@ -472,7 +474,7 @@ uint64_t cpu_sw64_load_fpcr(CPUSW64State *env)
 
 void helper_tb_flush(CPUSW64State *env)
 {
-    tb_flush(CPU(sw64_env_get_cpu(env)));
+//    tb_flush(CPU(sw64_env_get_cpu(env)));
 }
 
 void helper_cpustate_update(CPUSW64State *env, uint64_t pc)

@@ -5256,7 +5256,7 @@ DisasJumpType translate_one(DisasContextBase *dcbase, uint32_t insn,
 static void sw64_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
 {
     DisasContext* ctx = container_of(dcbase, DisasContext, base);
-    CPUSW64State* env = cpu->env_ptr; /*init by instance_initfn*/
+    CPUSW64State* env = cpu_env(cpu); /*init by instance_initfn*/
 
     ctx->tbflags = ctx->base.tb->flags;
     ctx->mem_idx = cpu_mmu_index(env, false);
@@ -5280,7 +5280,7 @@ static void sw64_tr_insn_start(DisasContextBase *dcbase, CPUState *cpu)
 static void sw64_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
 {
     DisasContext *ctx = container_of(dcbase, DisasContext, base);
-    CPUSW64State *env = cpu->env_ptr;
+    CPUSW64State *env = env_cpu(cpu);
     uint32_t insn;
 
     insn = cpu_ldl_code(env, ctx->base.pc_next & (~3UL));

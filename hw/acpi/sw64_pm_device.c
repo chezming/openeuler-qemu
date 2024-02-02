@@ -17,6 +17,7 @@
 #include "qemu/error-report.h"
 #include "hw/sw64/pm.h"
 #include "exec/address-spaces.h"
+#include "hw/boards.h"
 
 static void sw64_pm_device_plug_cb(HotplugHandler *hotplug_dev,
                                     DeviceState *dev, Error **errp)

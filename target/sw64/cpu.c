@@ -20,6 +20,7 @@
 #include "qemu/qemu-print.h"
 #include "cpu.h"
 #include "exec/exec-all.h"
+#include "exec/cpu-common.h"
 #include "sysemu/kvm.h"
 #include "disas/dis-asm.h"
 #include "kvm_sw64.h"
@@ -184,7 +185,7 @@ CpuDefinitionInfoList *qmp_query_cpu_definitions(Error **errp)
 
 static void sw64_cpu_disas_set_info(CPUState *cs, disassemble_info *info)
 {
-    CPUSW64State *env = cs->env_ptr;
+    CPUSW64State *env = cpu_env(cs);
     if (test_feature(env, SW64_FEATURE_CORE3))
         info->mach = bfd_mach_sw64_core3;
     else if(test_feature(env, SW64_FEATURE_CORE4))
@@ -197,7 +198,7 @@ static void sw64_cpu_disas_set_info(CPUState *cs, disassemble_info *info)
 static void core3_init(Object *obj)
 {
     CPUState *cs = CPU(obj);
-    CPUSW64State *env = cs->env_ptr;
+    CPUSW64State *env = cpu_env(cs);
 #ifdef CONFIG_USER_ONLY
     env->fpcr = 0x680e800000000000;
 #endif
@@ -207,7 +208,7 @@ static void core3_init(Object *obj)
 static void core4_init(Object *obj)
 {
     CPUState *cs = CPU(obj);
-    CPUSW64State *env = cs->env_ptr;
+    CPUSW64State *env = cpu_env(cs);
 #ifdef CONFIG_USER_ONLY
     env->fpcr = 0x680e800000000000;
     parallel_cpus = true;
@@ -250,9 +251,6 @@ static void sw64_cpu_initfn(Object *obj)
     SW64CPU *cpu = SW64_CPU(obj);
     CPUSW64State *env = &cpu->env;
 
-    cpu_set_cpustate_pointers(cpu);
-
-    cs->env_ptr = env;
 #ifndef CONFIG_USER_ONLY
     env->flags = ENV_FLAG_HM_MODE;
 #else
@@ -272,7 +270,7 @@ static void sw64_cpu_do_transaction_failed(CPUState *cs, hwaddr physaddr, vaddr 
     CPUSW64State *env = &cpu->env;
 
     if (retaddr) {
-        cpu_restore_state(cs, retaddr, true);
+        cpu_restore_state(cs, retaddr);
     }
     fprintf(stderr, "PC = %lx, Wrong IO addr. Hwaddr = %lx, vaddr = %lx, access_type = %d\n",
             env->pc, physaddr, addr, access_type);
@@ -315,8 +313,8 @@ static const struct SysemuCPUOps sw64_sysemu_ops = {
 
 #include "hw/core/tcg-cpu-ops.h"
 
-static const struct TCGCPUOps sw64_tcg_ops = {
-    .initialize = sw64_translate_init,
+__attribute__((unused)) static const struct TCGCPUOps sw64_tcg_ops = {
+    //.initialize = sw64_translate_init,
 
 #ifndef CONFIG_USER_ONLY
     .tlb_fill = sw64_cpu_tlb_fill,
@@ -353,7 +351,7 @@ static void sw64_cpu_class_init(ObjectClass *oc, void *data)
     cc->gdb_num_core_regs = 67;
     cc->gdb_core_xml_file = "sw64-core.xml";
 
-    cc->tcg_ops = &sw64_tcg_ops;
+//    cc->tcg_ops = &sw64_tcg_ops;
 }
 
 static const SW64CPUInfo sw64_cpus[] =

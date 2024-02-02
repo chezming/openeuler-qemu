@@ -3,6 +3,7 @@
 #include "exec/exec-all.h"
 #include "exec/helper-proto.h"
 #include "fpu/softfloat.h"
+#include "qemu/cpu-float.h"
 
 static inline uint32_t extractFloat16Frac(float16 a)
 {
