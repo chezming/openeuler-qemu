@@ -893,9 +893,7 @@ static int kvm_virtio_pci_vector_vq_use(VirtIOPCIProxy *proxy, int nvqs)
     VirtIODevice *vdev = virtio_bus_get_device(&proxy->bus);
 
 #ifdef __aarch64__
-    if (!strcmp(vdev->name, "virtio-net")) {
-        kvm_create_shadow_device(&proxy->pci_dev);
-    }
+    kvm_create_shadow_device(&proxy->pci_dev);
 #endif
 
     for (queue_no = 0; queue_no < nvqs; queue_no++) {
@@ -906,7 +904,7 @@ static int kvm_virtio_pci_vector_vq_use(VirtIOPCIProxy *proxy, int nvqs)
     }
 
 #ifdef __aarch64__
-    if (!strcmp(vdev->name, "virtio-net") && ret != 0) {
+    if (ret != 0) {
         kvm_delete_shadow_device(&proxy->pci_dev);
     }
 #endif
@@ -955,9 +953,7 @@ static void kvm_virtio_pci_vector_vq_release(VirtIOPCIProxy *proxy, int nvqs)
     }
 
 #ifdef __aarch64__
-    if (!strcmp(vdev->name, "virtio-net")) {
-        kvm_delete_shadow_device(&proxy->pci_dev);
-    }
+    kvm_delete_shadow_device(&proxy->pci_dev);
 #endif
 }
 
