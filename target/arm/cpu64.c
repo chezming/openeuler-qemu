@@ -705,6 +705,26 @@ static void aarch64_a53_initfn(Object *obj)
     define_cortex_a72_a57_a53_cp_reginfo(cpu);
 }
 
+static void aarch64_kunpeng_920_initfn(Object *obj)
+{
+    ARMCPU *cpu = ARM_CPU(obj);
+
+    /*
+     * Hisilicon Kunpeng-920 CPU is similar to cortex-a72,
+     * so first initialize cpu data as cortex-a72,
+     * and then update the special register.
+     */
+    aarch64_a72_initfn(obj);
+
+    cpu->midr = 0x480fd010;
+    cpu->ctr = 0x84448004;
+    cpu->isar.id_aa64pfr0 = 0x11001111;
+    cpu->isar.id_aa64dfr0 = 0x110305408;
+    cpu->isar.id_aa64isar0 = 0x10211120;
+    cpu->isar.id_aa64mmfr0 = 0x101125;
+    cpu->kvm_target = KVM_ARM_TARGET_GENERIC_V8;
+}
+
 static void aarch64_host_initfn(Object *obj)
 {
 #if defined(CONFIG_KVM)
@@ -744,6 +764,7 @@ static void aarch64_max_initfn(Object *obj)
 static const ARMCPUInfo aarch64_cpus[] = {
     { .name = "cortex-a57",         .initfn = aarch64_a57_initfn },
     { .name = "cortex-a53",         .initfn = aarch64_a53_initfn },
+    { .name = "Kunpeng-920",        .initfn = aarch64_kunpeng_920_initfn},
     { .name = "max",                .initfn = aarch64_max_initfn },
 #if defined(CONFIG_KVM) || defined(CONFIG_HVF)
     { .name = "host",               .initfn = aarch64_host_initfn },
