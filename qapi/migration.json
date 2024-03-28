@@ -1419,6 +1419,18 @@
   'data': { 'pass': 'int' } }
 
 ##
+# @MIGRATION_COMPRESS_PID:
+#
+# Emitted when compress thread appear
+#
+# @pid: pid of compress thread
+#
+# Since: 6.2
+##
+{ 'event': 'MIGRATION_COMPRESS_PID',
+  'data': { 'pid': 'int' } }
+
+##
 # @COLOMessage:
 #
 # The message transmission between Primary side and Secondary side.

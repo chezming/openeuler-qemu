@@ -87,12 +87,17 @@ static CompressResult do_compress_ram_page(QEMUFile *f, z_stream *stream,
                                            RAMBlock *block, ram_addr_t offset,
                                            uint8_t *source_buf);
 
+void qapi_event_send_migration_compress_pid(int);
+
 static void *do_data_compress(void *opaque)
 {
     CompressParam *param = opaque;
     RAMBlock *block;
     ram_addr_t offset;
     CompressResult result;
+
+    /* report compress thread pids to libvirt */
+    qapi_event_send_migration_compress_pid(qemu_get_thread_id());
 
     qemu_mutex_lock(&param->mutex);
     while (!param->quit) {
