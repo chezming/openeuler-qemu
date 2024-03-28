@@ -120,6 +120,8 @@ elif cpu in ['riscv64']
   kvm_targets = ['riscv64-softmmu']
 elif cpu in ['sw64']
   kvm_targets = ['sw64-softmmu']
+elif cpu in ['loongarch64']
+  kvm_targets = ['loongarch64-softmmu']
 else
   kvm_targets = []
 endif
@@ -3368,6 +3370,7 @@ if have_system or have_user
     'target/hppa',
     'target/i386',
     'target/i386/kvm',
+    'target/loongarch',
     'target/mips/tcg',
     'target/nios2',
     'target/ppc',

@@ -326,6 +326,8 @@ static int parse_block_error_action(const char *buf, bool is_read, Error **errp)
         return BLOCKDEV_ON_ERROR_STOP;
     } else if (!strcmp(buf, "report")) {
         return BLOCKDEV_ON_ERROR_REPORT;
+    } else if (!strcmp(buf, "retry")) {
+        return BLOCKDEV_ON_ERROR_RETRY;
     } else {
         error_setg(errp, "'%s' invalid %s error action",
                    buf, is_read ? "read" : "write");
@@ -482,6 +484,7 @@ static BlockBackend *blockdev_init(const char *file, QDict *bs_opts,
     const char *buf;
     int bdrv_flags = 0;
     int on_read_error, on_write_error;
+    int64_t retry_interval, retry_timeout;
     OnOffAuto account_invalid, account_failed;
     bool writethrough, read_only;
     BlockBackend *blk;
@@ -493,6 +496,7 @@ static BlockBackend *blockdev_init(const char *file, QDict *bs_opts,
     QDict *interval_dict = NULL;
     QList *interval_list = NULL;
     const char *id;
+    const char *cache;
     BlockdevDetectZeroesOptions detect_zeroes =
         BLOCKDEV_DETECT_ZEROES_OPTIONS_OFF;
     const char *throttling_group = NULL;
@@ -556,7 +560,7 @@ static BlockBackend *blockdev_init(const char *file, QDict *bs_opts,
         qdict_put_str(bs_opts, "driver", buf);
     }
 
-    on_write_error = BLOCKDEV_ON_ERROR_ENOSPC;
+    on_write_error = BLOCKDEV_ON_ERROR_REPORT;
     if ((buf = qemu_opt_get(opts, "werror")) != NULL) {
         on_write_error = parse_block_error_action(buf, 0, &error);
         if (error) {
@@ -574,11 +578,30 @@ static BlockBackend *blockdev_init(const char *file, QDict *bs_opts,
         }
     }
 
+    retry_interval = qemu_opt_get_number(opts, "retry_interval",
+                                         BLOCK_BACKEND_DEFAULT_RETRY_INTERVAL);
+    retry_timeout = qemu_opt_get_number(opts, "retry_timeout", 0);
+
     if (snapshot) {
         bdrv_flags |= BDRV_O_SNAPSHOT;
     }
 
     read_only = qemu_opt_get_bool(opts, BDRV_OPT_READ_ONLY, false);
+
+    if (!file || !*file) {
+        cache = qdict_get_try_str(bs_opts, BDRV_OPT_CACHE_NO_FLUSH);
+        if (cache && !strcmp(cache, "on")) {
+            bdrv_flags |= BDRV_O_NO_FLUSH;
+        }
+
+        cache = qdict_get_try_str(bs_opts, BDRV_OPT_CACHE_DIRECT);
+        if (cache && !strcmp(cache, "on")) {
+            bdrv_flags |= BDRV_O_NOCACHE;
+        }
+
+        qdict_del(bs_opts, BDRV_OPT_CACHE_NO_FLUSH);
+        qdict_del(bs_opts, BDRV_OPT_CACHE_DIRECT);
+    }
 
     /* init */
     if ((!file || !*file) && !qdict_size(bs_opts)) {
@@ -637,6 +660,11 @@ static BlockBackend *blockdev_init(const char *file, QDict *bs_opts,
 
     blk_set_enable_write_cache(blk, !writethrough);
     blk_set_on_error(blk, on_read_error, on_write_error);
+    if (on_read_error == BLOCKDEV_ON_ERROR_RETRY ||
+        on_write_error == BLOCKDEV_ON_ERROR_RETRY) {
+        blk_set_on_error_retry_interval(blk, retry_interval);
+        blk_set_on_error_retry_timeout(blk, retry_timeout);
+    }
 
     if (!monitor_add_blk(blk, id, errp)) {
         blk_unref(blk);
@@ -772,6 +800,14 @@ QemuOptsList qemu_legacy_drive_opts = {
             .type = QEMU_OPT_STRING,
             .help = "write error action",
         },{
+            .name = "retry_interval",
+            .type = QEMU_OPT_NUMBER,
+            .help = "interval for retry action in millisecond",
+        },{
+            .name = "retry_timeout",
+            .type = QEMU_OPT_NUMBER,
+            .help = "timeout for retry action in millisecond",
+        },{
             .name = "copy-on-read",
             .type = QEMU_OPT_BOOL,
             .help = "copy read data from backing file into image file",
@@ -793,6 +829,7 @@ DriveInfo *drive_new(QemuOpts *all_opts, BlockInterfaceType block_default_type,
     BlockInterfaceType type;
     int max_devs, bus_id, unit_id, index;
     const char *werror, *rerror;
+    int64_t retry_interval, retry_timeout;
     bool read_only = false;
     bool copy_on_read;
     const char *filename;
@@ -1009,6 +1046,29 @@ DriveInfo *drive_new(QemuOpts *all_opts, BlockInterfaceType block_default_type,
             goto fail;
         }
         qdict_put_str(bs_opts, "rerror", rerror);
+    }
+
+    if (qemu_opt_find(legacy_opts, "retry_interval")) {
+        if ((werror == NULL || strcmp(werror, "retry")) &&
+            (rerror == NULL || strcmp(rerror, "retry"))) {
+            error_setg(errp, "retry_interval is only supported "
+                             "by werror/rerror=retry");
+            goto fail;
+        }
+        retry_interval = qemu_opt_get_number(legacy_opts, "retry_interval",
+                             BLOCK_BACKEND_DEFAULT_RETRY_INTERVAL);
+        qdict_put_int(bs_opts, "retry_interval", retry_interval);
+    }
+
+    if (qemu_opt_find(legacy_opts, "retry_timeout")) {
+        if ((werror == NULL || strcmp(werror, "retry")) &&
+            (rerror == NULL || strcmp(rerror, "retry"))) {
+            error_setg(errp, "retry_timeout is only supported "
+                             "by werror/rerror=retry");
+            goto fail;
+        }
+        retry_timeout = qemu_opt_get_number(legacy_opts, "retry_timeout", 0);
+        qdict_put_int(bs_opts, "retry_timeout", retry_timeout);
     }
 
     /* Actual block device init: Functionality shared with blockdev-add */
@@ -3792,6 +3852,14 @@ QemuOptsList qemu_common_drive_opts = {
             .name = "werror",
             .type = QEMU_OPT_STRING,
             .help = "write error action",
+        },{
+            .name = "retry_interval",
+            .type = QEMU_OPT_NUMBER,
+            .help = "interval for retry action in millisecond",
+        },{
+            .name = "retry_timeout",
+            .type = QEMU_OPT_NUMBER,
+            .help = "timeout for retry action in millisecond",
         },{
             .name = BDRV_OPT_READ_ONLY,
             .type = QEMU_OPT_BOOL,

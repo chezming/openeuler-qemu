@@ -1286,10 +1286,12 @@
 #
 # @auto: inherit the error handling policy of the backend (since: 2.7)
 #
+# @retry: retrying IO with errors
+#
 # Since: 1.3
 ##
 { 'enum': 'BlockdevOnError',
-  'data': ['report', 'ignore', 'enospc', 'stop', 'auto'] }
+  'data': ['report', 'ignore', 'enospc', 'stop', 'auto', 'retry'] }
 
 ##
 # @MirrorSyncMode:
@@ -4906,6 +4908,8 @@
 #
 # @extent-size-hint: Extent size hint to add to the image file; 0 for
 #     not adding an extent size hint (default: 1 MB, since 5.1)
+# @cache: Cache mode used to write the output disk image
+# @buffersize: Buffer size for creating image
 #
 # Since: 2.12
 ##
@@ -4914,7 +4918,9 @@
             'size':                 'size',
             '*preallocation':       'PreallocMode',
             '*nocow':               'bool',
-            '*extent-size-hint':    'size'} }
+            '*extent-size-hint':    'size',
+            '*cache':               'str',
+            '*buffersize':          'size'} }
 
 ##
 # @BlockdevCreateOptionsGluster:
@@ -5476,10 +5482,12 @@
 #
 # @stop: error caused VM to be stopped
 #
+# @retry: retry IO with errors
+#
 # Since: 2.1
 ##
 { 'enum': 'BlockErrorAction',
-  'data': [ 'ignore', 'report', 'stop' ] }
+  'data': [ 'ignore', 'report', 'stop', 'retry' ] }
 
 ##
 # @BLOCK_IMAGE_CORRUPTED:
