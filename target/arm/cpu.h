@@ -3012,6 +3012,8 @@ bool write_list_to_cpustate(ARMCPU *cpu);
  */
 bool write_cpustate_to_list(ARMCPU *cpu, bool kvm_sync);
 
+bool is_readonly_reg(const ARMCPRegInfo *ri);
+
 #define ARM_CPUID_TI915T      0x54029152
 #define ARM_CPUID_TI925T      0x54029252
 

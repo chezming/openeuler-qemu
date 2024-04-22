@@ -248,6 +248,15 @@ bool kvm_arm_get_host_cpu_features(ARMHostCPUFeatures *ahcf);
 void kvm_arm_sve_get_vls(CPUState *cs, unsigned long *map);
 
 /**
+ * kvm_arm_set_cpu_kvm_target_from_host:
+ * @cpu: ARMCPU to set the features for
+ *
+ * Set up the ARMCPU struct kvm_target to match the information probed
+ * from the host CPU.
+ */
+void kvm_arm_set_cpu_kvm_target_from_host(ARMCPU *cpu);
+
+/**
  * kvm_arm_set_cpu_features_from_host:
  * @cpu: ARMCPU to set the features for
  *
@@ -411,10 +420,20 @@ static inline bool kvm_arm_cpu_feature_supported(void)
     return false;
 }
 
+static inline bool kvm_arm_cpu_feature_supported(void)
+{
+    return false;
+}
+
 /*
  * These functions should never actually be called without KVM support.
  */
 static inline void kvm_arm_set_cpu_features_from_host(ARMCPU *cpu)
+{
+    g_assert_not_reached();
+}
+
+static inline void kvm_arm_set_cpu_kvm_target_from_host(ARMCPU *cpu)
 {
     g_assert_not_reached();
 }
