@@ -496,12 +496,27 @@ static int64_t cvtnum(const char *name, const char *value)
     return cvtnum_full(name, value, 0, INT64_MAX);
 }
 
+static bool startwith_rbd_dev(const char *filename)
+{
+    const char *blk = "/dev";
+    const char *rbd = "rbd:";
+
+    if (strncmp(filename, blk, strlen(blk)) == 0 || 
+        strncmp(filename, rbd, strlen(rbd)) == 0) {
+        return true;
+    }
+    return false;
+}
+
 static bool is_reg_file(const char *filename)
 {
     struct stat st;
 
     /* file not exist, file will be create later, so it's a reg file */
     if (access(filename, F_OK) == -1) {
+        if (startwith_rbd_dev(filename)){
+            return false;
+        }
         return true;
     }
 
