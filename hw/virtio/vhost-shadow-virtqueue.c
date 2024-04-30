@@ -414,6 +414,7 @@ static uint16_t vhost_svq_last_desc_of_chain(const VhostShadowVirtqueue *svq,
     return i;
 }
 
+G_GNUC_WARN_UNUSED_RESULT
 static VirtQueueElement *vhost_svq_get_buf(VhostShadowVirtqueue *svq,
                                            uint32_t *len)
 {
@@ -529,7 +530,8 @@ size_t vhost_svq_poll(VhostShadowVirtqueue *svq, size_t num)
     uint32_t r;
 
     while (num--) {
-        int64_t start_us = g_get_monotonic_time();
+        g_autofree VirtQueueElement *elem = NULL;
+	int64_t start_us = g_get_monotonic_time();
 
         do {
             if (vhost_svq_more_used(svq)) {
@@ -541,8 +543,8 @@ size_t vhost_svq_poll(VhostShadowVirtqueue *svq, size_t num)
             }
         } while (true);
 
-        vhost_svq_get_buf(svq, &r);
-        len += r;
+        elem = vhost_svq_get_buf(svq, &r);
+	len += r;
     }
 
     return len;
