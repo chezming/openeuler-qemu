@@ -319,7 +319,7 @@ static void cleanup_dirtyrate_stat(struct DirtyRateConfig config)
 {
     /* last calc-dirty-rate qmp use dirty ring mode */
     if (dirtyrate_mode == DIRTY_RATE_MEASURE_MODE_DIRTY_RING) {
-        free(DirtyStat.dirty_ring.rates);
+        g_free(DirtyStat.dirty_ring.rates);
         DirtyStat.dirty_ring.rates = NULL;
     }
 }
